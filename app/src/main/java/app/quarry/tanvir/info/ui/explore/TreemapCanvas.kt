@@ -47,10 +47,9 @@ import androidx.core.content.res.ResourcesCompat
 import app.quarry.tanvir.info.R
 import app.quarry.tanvir.info.domain.model.StorageFormatter
 import app.quarry.tanvir.info.domain.treemap.TreemapNode
-import app.quarry.tanvir.info.domain.treemap.TreemapRect
+import app.quarry.tanvir.info.domain.treemap.TreemapRenderPolicy
 import kotlinx.coroutines.launch
 import kotlin.math.abs
-import kotlin.math.sqrt
 
 private const val MIN_SCALE = 1f
 private const val MAX_SCALE = 5f
@@ -58,7 +57,8 @@ private const val MAX_SCALE = 5f
 /**
  * Responsive, hardware-accelerated Treemap Canvas.
  * - Rectangle areas represent bytes, without minimum-size visual inflation.
- * - Fluid navigation animations provide visual continuity when drilling down into or popping out of folders.
+ * - Small maps reuse bounded gradient caches; large maps use a fixed flat-color palette.
+ * - Viewport culling reduces drawing work while zooming, without changing byte areas.
  * - Tactile press feedback highlights tapped tiles with a luminous pulse.
  * - Smooth animated zoom reset on double-tap and seamless gesture panning/zooming.
  * - Hit-testing is performed in unscaled content coordinates so tiny tiles stay tappable while zoomed.
@@ -81,6 +81,41 @@ fun TreemapCanvas(
         Color.White.copy(alpha = 0.20f)
     } else {
         Color.Black.copy(alpha = 0.14f)
+    }
+
+    val flatPalette = remember(isDark) {
+        List(TreemapRenderPolicy.FLAT_PALETTE_SIZE) { index ->
+            val isDirectory = index >= TreemapRenderPolicy.COLORS_PER_KIND
+            hslToColor(
+                hue = (index % TreemapRenderPolicy.COLORS_PER_KIND) * 360f / TreemapRenderPolicy.COLORS_PER_KIND,
+                saturation = if (isDirectory) 0.65f else 0.78f,
+                lightness = if (isDark) {
+                    if (isDirectory) 0.44f else 0.50f
+                } else {
+                    if (isDirectory) 0.40f else 0.46f
+                }
+            )
+        }
+    }
+    // Replace the cache with each map instead of retaining shaders from visited folders.
+    // Large maps allocate no per-node brushes, even if they contain 100,000 files.
+    val cachedGradients: List<Brush?> = remember(nodes, isDark) {
+        val indices = TreemapRenderPolicy.gradientNodeIndices(nodes)
+        if (indices.isEmpty()) {
+            emptyList()
+        } else {
+            MutableList<Brush?>(nodes.size) { null }.apply {
+                indices.forEach { index ->
+                    val node = nodes[index]
+                    val colors = getTreemapTileColors(node, index, isDark)
+                    this[index] = Brush.verticalGradient(
+                        colors = listOf(colors.first, colors.second),
+                        startY = node.rect.top,
+                        endY = node.rect.bottom
+                    )
+                }
+            }
+        }
     }
 
     val customTypeface = remember(context) {
@@ -110,6 +145,7 @@ fun TreemapCanvas(
 
     // Directory Transition Animation
     val transitionAnim = remember { Animatable(1f) }
+    val animateFolderChanges = TreemapRenderPolicy.shouldAnimate(nodes.size)
     var lastPath by remember { mutableStateOf(currentPath) }
     var initialTransitionScale by remember { mutableFloatStateOf(1f) }
 
@@ -151,15 +187,17 @@ fun TreemapCanvas(
         }
 
         // Trigger smooth drill-down or drill-up navigation animation on path change
-        LaunchedEffect(currentPath) {
+        LaunchedEffect(currentPath, animateFolderChanges) {
             if (lastPath != currentPath && currentPath.isNotEmpty()) {
                 val isDrillDown = lastPath.isNotEmpty() && currentPath.startsWith(lastPath)
                 val isDrillUp = lastPath.isNotEmpty() && lastPath.startsWith(currentPath)
-                initialTransitionScale = when {
-                    isDrillDown -> 0.91f
-                    isDrillUp -> 1.09f
-                    else -> 0.95f
-                }
+                initialTransitionScale = if (animateFolderChanges) {
+                    when {
+                        isDrillDown -> 0.91f
+                        isDrillUp -> 1.09f
+                        else -> 0.95f
+                    }
+                } else 1f
                 lastPath = currentPath
 
                 // Reset zoom when navigating directories
@@ -168,12 +206,17 @@ fun TreemapCanvas(
                     offset = Offset.Zero
                 }
 
-                transitionAnim.snapTo(0f)
-                transitionAnim.animateTo(
-                    targetValue = 1f,
-                    animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing)
-                )
-            } else if (transitionAnim.value < 1f) {
+                if (animateFolderChanges) {
+                    transitionAnim.snapTo(0f)
+                    transitionAnim.animateTo(
+                        targetValue = 1f,
+                        animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing)
+                    )
+                } else {
+                    transitionAnim.snapTo(1f)
+                }
+            } else if (!animateFolderChanges || transitionAnim.value < 1f) {
+                initialTransitionScale = 1f
                 transitionAnim.snapTo(1f)
             }
         }
@@ -259,7 +302,7 @@ fun TreemapCanvas(
                                         )
                                     }
                                     val effectiveRadius = if (currentScale > 1f) touchRadiusPx / currentScale else touchRadiusPx
-                                    val hitNode = findBestMatchingNode(
+                                    val hitNode = TreemapRenderPolicy.hitTest(
                                         nodes = nodes,
                                         x = contentTap.x,
                                         y = contentTap.y,
@@ -304,7 +347,7 @@ fun TreemapCanvas(
                                         )
                                     }
                                     val effectiveRadius = if (currentScale > 1f) touchRadiusPx / currentScale else touchRadiusPx
-                                    val clickedNode = findBestMatchingNode(
+                                    val clickedNode = TreemapRenderPolicy.hitTest(
                                         nodes = nodes,
                                         x = contentTap.x,
                                         y = contentTap.y,
@@ -320,38 +363,50 @@ fun TreemapCanvas(
                     val animVal = transitionAnim.value
                     val currentTransitionScale = initialTransitionScale + (1.0f - initialTransitionScale) * animVal
                     val currentTransitionAlpha = (animVal * 1.35f).coerceAtMost(1f)
+                    val contentScale = scale * currentTransitionScale
+                    val viewport = remember(widthPx, heightPx, contentScale, offset) {
+                        TreemapRenderPolicy.contentViewport(widthPx, heightPx, contentScale, offset.x, offset.y)
+                    }
+                    val visibleIndices = remember(nodes, viewport) {
+                        TreemapRenderPolicy.visibleNodeIndices(nodes, viewport)
+                    }
+                    val drawTileBorders = TreemapRenderPolicy.shouldDrawBorders(visibleIndices.size)
+                    val labelBudget = TreemapRenderPolicy.labelBudget(visibleIndices.size)
 
                     Canvas(
                         modifier = Modifier
                             .fillMaxSize()
                             .graphicsLayer(
-                                scaleX = scale * currentTransitionScale,
-                                scaleY = scale * currentTransitionScale,
+                                scaleX = contentScale,
+                                scaleY = contentScale,
                                 translationX = offset.x,
                                 translationY = offset.y,
                                 alpha = currentTransitionAlpha
                             )
                     ) {
                         val strokeWidthPx = (1.0.dp.toPx() / scale).coerceAtLeast(0.5f)
+                        val borderStroke = Stroke(width = strokeWidthPx)
+                        val feedbackStrokeWidth = strokeWidthPx * 1.5f
+                        val feedbackStroke = Stroke(width = feedbackStrokeWidth)
 
                         val baseTitleSize = density.run { 11.5.dp.toPx() }
                         val baseSubtextSize = density.run { 9.5.dp.toPx() }
 
                         textPaint.textSize = baseTitleSize / scale
-                        textPaint.setShadowLayer(
-                            (3f / scale).coerceAtLeast(0.5f),
-                            0f,
-                            (1.5f / scale).coerceAtLeast(0.5f),
-                            android.graphics.Color.argb(220, 0, 0, 0)
-                        )
-
                         subtextPaint.textSize = baseSubtextSize / scale
-                        subtextPaint.setShadowLayer(
-                            (2.5f / scale).coerceAtLeast(0.5f),
-                            0f,
-                            (1f / scale).coerceAtLeast(0.5f),
-                            android.graphics.Color.argb(200, 0, 0, 0)
-                        )
+                        if (animateFolderChanges) {
+                            textPaint.setShadowLayer(
+                                (3f / scale).coerceAtLeast(0.5f), 0f,
+                                (1.5f / scale).coerceAtLeast(0.5f), android.graphics.Color.argb(220, 0, 0, 0)
+                            )
+                            subtextPaint.setShadowLayer(
+                                (2.5f / scale).coerceAtLeast(0.5f), 0f,
+                                (1f / scale).coerceAtLeast(0.5f), android.graphics.Color.argb(200, 0, 0, 0)
+                            )
+                        } else {
+                            textPaint.clearShadowLayer()
+                            subtextPaint.clearShadowLayer()
+                        }
 
                         val minVisualWForTitle = density.run { 26.dp.toPx() }
                         val minVisualHForTitle = density.run { 16.dp.toPx() }
@@ -362,48 +417,47 @@ fun TreemapCanvas(
                         val titleTopOffset = density.run { 12.dp.toPx() } / scale
                         val subtextTopOffset = density.run { 11.dp.toPx() } / scale
 
-                        nodes.forEachIndexed { index, node ->
+                        var labeledTiles = 0
+                        visibleIndices.forEach { index ->
+                            val node = nodes[index]
                             val rect = node.rect
                             val w = rect.width
                             val h = rect.height
 
                             if (node.size > 0L && w > 0f && h > 0f) {
-                                val (colorTop, colorBottom) = getTreemapTileColors(
-                                    node = node,
-                                    index = index,
-                                    isDark = isDark
-                                )
-
                                 // Paint the actual measured rectangle, including subpixel tiles.
                                 // Enlarged touch targets below never alter these dimensions.
                                 val drawRectTopLeft = Offset(rect.left, rect.top)
                                 val drawRectSize = Size(w, h)
 
-                                drawRect(
-                                    brush = Brush.verticalGradient(
-                                        colors = listOf(colorTop, colorBottom),
-                                        startY = rect.top,
-                                        endY = rect.bottom
-                                    ),
-                                    topLeft = drawRectTopLeft,
-                                    size = drawRectSize
-                                )
+                                val gradient = cachedGradients.getOrNull(index)
+                                if (gradient != null) {
+                                    drawRect(brush = gradient, topLeft = drawRectTopLeft, size = drawRectSize)
+                                } else {
+                                    drawRect(
+                                        color = flatPalette[TreemapRenderPolicy.flatColorIndex(node.path, node.isDirectory)],
+                                        topLeft = drawRectTopLeft,
+                                        size = drawRectSize
+                                    )
+                                }
 
                                 val canDrawBorder = w > strokeWidthPx * 2f && h > strokeWidthPx * 2f
-                                if (canDrawBorder) {
+                                if (canDrawBorder && drawTileBorders) {
                                     val halfStroke = strokeWidthPx / 2f
                                     drawRect(
                                         color = borderColor,
                                         topLeft = Offset(rect.left + halfStroke, rect.top + halfStroke),
                                         size = Size(w - strokeWidthPx, h - strokeWidthPx),
-                                        style = Stroke(width = strokeWidthPx)
+                                        style = borderStroke
                                     )
                                 }
 
                                 val visualW = w * scale
                                 val visualH = h * scale
 
-                                if (visualW >= minVisualWForTitle && visualH >= minVisualHForTitle) {
+                                if (labeledTiles < labelBudget &&
+                                    visualW >= minVisualWForTitle && visualH >= minVisualHForTitle
+                                ) {
                                     val maxTextWidth = w - (2f * paddingX)
                                     if (maxTextWidth > 0f) {
                                         val fullName = node.name
@@ -427,6 +481,7 @@ fun TreemapCanvas(
                                         }
 
                                         if (displayName.isNotEmpty()) {
+                                            labeledTiles++
                                             val xPos = rect.left + paddingX
                                             val yPos = rect.top + titleTopOffset
 
@@ -474,12 +529,11 @@ fun TreemapCanvas(
                                         size = drawRectSize
                                     )
                                     if (canDrawBorder) {
-                                        val feedbackStroke = strokeWidthPx * 1.5f
                                         drawRect(
                                             color = Color.White.copy(alpha = 0.60f),
-                                            topLeft = Offset(rect.left + feedbackStroke / 2f, rect.top + feedbackStroke / 2f),
-                                            size = Size(w - feedbackStroke, h - feedbackStroke),
-                                            style = Stroke(width = feedbackStroke)
+                                            topLeft = Offset(rect.left + feedbackStrokeWidth / 2f, rect.top + feedbackStrokeWidth / 2f),
+                                            size = Size(w - feedbackStrokeWidth, h - feedbackStrokeWidth),
+                                            style = feedbackStroke
                                         )
                                     }
                                 }
@@ -490,61 +544,6 @@ fun TreemapCanvas(
             }
         }
     }
-}
-
-private fun findBestMatchingNode(
-    nodes: List<TreemapNode>,
-    x: Float,
-    y: Float,
-    touchRadiusPx: Float
-): TreemapNode? {
-    if (!x.isFinite() || !y.isFinite()) return null
-    val pickableNodes = nodes.filter { it.size > 0L && it.rect.width > 0f && it.rect.height > 0f }
-    if (pickableNodes.isEmpty()) return null
-
-    val directHits = pickableNodes.filter { node ->
-        x >= node.rect.left && x <= node.rect.right &&
-                y >= node.rect.top && y <= node.rect.bottom
-    }
-
-    if (directHits.isNotEmpty()) {
-        val smallestDirect = directHits.minByOrNull { it.rect.width * it.rect.height }
-
-        // Only the touch target grows for a small tile; its rendered area stays proportional.
-        val nearbySmallNode = pickableNodes
-            .filter { node ->
-                val dist = distanceToRect(x, y, node.rect)
-                dist <= touchRadiusPx && (node.rect.width * node.rect.height < (smallestDirect?.let { it.rect.width * it.rect.height * 0.3f } ?: Float.MAX_VALUE))
-            }
-            .minByOrNull { distanceToRect(x, y, it.rect) }
-
-        if (nearbySmallNode != null && distanceToRect(x, y, nearbySmallNode.rect) <= touchRadiusPx * 0.75f) {
-            return nearbySmallNode
-        }
-
-        return smallestDirect
-    }
-
-    val candidate = pickableNodes.minByOrNull { distanceToRect(x, y, it.rect) }
-    if (candidate != null && distanceToRect(x, y, candidate.rect) <= touchRadiusPx * 1.5f) {
-        return candidate
-    }
-
-    return null
-}
-
-private fun distanceToRect(x: Float, y: Float, rect: TreemapRect): Float {
-    val dx = when {
-        x < rect.left -> rect.left - x
-        x > rect.right -> x - rect.right
-        else -> 0f
-    }
-    val dy = when {
-        y < rect.top -> rect.top - y
-        y > rect.bottom -> y - rect.bottom
-        else -> 0f
-    }
-    return sqrt(dx * dx + dy * dy)
 }
 
 private fun getTreemapTileColors(
