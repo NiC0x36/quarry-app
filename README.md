@@ -5,6 +5,7 @@ A read-only Android folder-size explorer based on [Quarry by Tanvir Hasan](https
 ## Changes in this fork
 
 - Rectangle areas represent bytes. Small files have no artificial minimum area; use zoom or the folder/list views to inspect them.
+- Explorer queries are scoped to the active view; opening a folder does not require loading separate copies of the entire index. Large maps use bounded gradient resources and skip offscreen drawing, and thumbnail decoding is bounded.
 - Unreadable, excluded and partially scanned folders are distinguished from empty folders. Their sizes are unknown or lower bounds.
 - The overview separates indexed files, unindexed used space and free space against the same total capacity. Private app data, system files and filesystem overhead may be part of the unindexed remainder.
 - Hidden files are included by default. Changed exclusions or scan-inclusion settings take effect on the next full scan.

@@ -4,6 +4,8 @@
 
 This checkout is the analysis-only `NiC0x36/quarry-app` fork. User files must never be changed, opened in external apps, shared, restored, purged, installed or uninstalled. Keep the denied backend APIs even when related UI is unreachable. Do not add network permission, telemetry or user-data exports. Index and path-bearing preferences must remain in Android no-backup storage, with explicit backup and transfer exclusions. Tests use synthetic data only.
 
+Use neutral feature/branch names without personal device identifiers. Generated implementations must be explicitly credited with `Implemented-by: OpenAI Codex (ChatGPT)` in commit messages; retain the repository owner's sign-off and private noreply email. Do not add or retrieve phone diagnostics without the user's explicit permission.
+
 Treemap areas must be strictly proportional to bytes; improve touch handling without inflating areas. Keep unreadable/excluded/partial scan states visible and account for unindexed used space. App-size analysis is excluded. Settings that change scan inclusion require another full scan.
 
 The fork uses its own application ID and debug signing identity. Its workflow is manual verification only; no automated release publishing or Telegram integration. Use an existing user-selected JDK 21 and Android SDK. Never install Java automatically. These requirements supersede conflicting descriptions of the original app below.

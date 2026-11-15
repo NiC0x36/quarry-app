@@ -16,8 +16,8 @@ android {
         applicationId = "io.github.nic0x36.quarry.local"
         minSdk = 31
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0-local"
+        versionCode = 2
+        versionName = "0.1.1-local"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

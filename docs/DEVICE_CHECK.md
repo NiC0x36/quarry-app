@@ -10,6 +10,7 @@ Use a checked **Quarry Local** APK. It has a separate package identity and does 
 6. Confirm that file details have no delete, trash, rename, external-open or share controls. APK files must not launch an installer.
 7. Cancel a scan, then run another complete scan. Existing user files must remain unchanged.
 8. Change an exclusion or hidden-file scan setting. The app must request a new scan; run it before comparing results.
+9. Open several folders and switch repeatedly between **Folders**, **List** and **Treemap**, including a folder with many entries. Check whether navigation remains responsive and whether any unexpected closure occurs. A resource-pressure fix is not proof that every reported crash is resolved.
 
 Report only whether these checks pass and any error text needed for diagnosis. Use synthetic folders for screenshots or public bug reports; do not publish personal paths or scan contents.
 
