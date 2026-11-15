@@ -151,7 +151,9 @@ fun FileListView(
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = if (file.isDirectory) {
+                            text = if (file.hasIncompleteScan) {
+                                file.scanStatusDescription
+                            } else if (file.isDirectory) {
                                 if (dateStr.isNotEmpty()) "${file.directChildrenCount} items · $dateStr" else "${file.directChildrenCount} items"
                             } else {
                                 if (dateStr.isNotEmpty()) dateStr else category.displayName
@@ -164,7 +166,9 @@ fun FileListView(
                     }
 
                     Text(
-                        text = StorageFormatter.formatBytes(file.size),
+                        text = if (file.hasIncompleteScan && file.size == 0L) "Unknown"
+                            else if (file.hasIncompleteScan) "Known: ${StorageFormatter.formatBytes(file.size)}"
+                            else StorageFormatter.formatBytes(file.size),
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
                         color = if (file.isDirectory) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface

@@ -151,21 +151,11 @@ class ExploreViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private fun filterHiddenAndExcluded(
-        files: List<FileEntity>,
-        showHidden: Boolean,
-        excluded: Set<String>
-    ): List<FileEntity> {
-        return files.filter { entity ->
-            // Hide zero-byte folders everywhere in Explore (treemap + lists) so empty
-            // directories never consume layout area or list rows.
-            if (entity.isDirectory && entity.size == 0L) return@filter false
-            val hiddenOk = showHidden || !entity.name.startsWith(".")
-            val excludedOk = !app.quarry.tanvir.info.domain.scanner.ExclusionMatcher.isExcluded(entity.path, excluded) &&
-                    !app.quarry.tanvir.info.domain.scanner.ExclusionMatcher.isExcluded(entity.parentPath ?: "", excluded)
-            hiddenOk && excludedOk
+    // Exclusions change the next scan, never the already indexed hierarchy or its totals.
+    private fun filterForDisplay(files: List<FileEntity>, showHidden: Boolean): List<FileEntity> =
+        files.filter { entity ->
+            showHidden || (!entity.name.startsWith(".") && !entity.path.contains("/."))
         }
-    }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private val filteredLargestFiles: StateFlow<List<FileEntity>> = combine(
@@ -174,10 +164,9 @@ class ExploreViewModel(application: Application) : AndroidViewModel(application)
             repository.getLargestFiles(100, volId)
         },
         prefsRepo.scanHiddenFiles,
-        prefsRepo.excludedFolders,
         _sortOrder
-    ) { largest, showHidden, excluded, sort ->
-        val filtered = filterHiddenAndExcluded(largest, showHidden, excluded)
+    ) { largest, showHidden, sort ->
+        val filtered = filterForDisplay(largest, showHidden)
         filtered.sortedWith(sort.comparator(keepDirectoriesFirst = false))
     }.stateIn(
         scope = viewModelScope,
@@ -192,10 +181,9 @@ class ExploreViewModel(application: Application) : AndroidViewModel(application)
             repository.getAllFiles(volId)
         },
         prefsRepo.scanHiddenFiles,
-        prefsRepo.excludedFolders,
         _sortOrder
-    ) { files, showHidden, excluded, sort ->
-        val filtered = filterHiddenAndExcluded(files, showHidden, excluded)
+    ) { files, showHidden, sort ->
+        val filtered = filterForDisplay(files, showHidden)
         filtered.sortedWith(sort.comparator(keepDirectoriesFirst = true))
     }.stateIn(
         scope = viewModelScope,
@@ -278,10 +266,9 @@ class ExploreViewModel(application: Application) : AndroidViewModel(application)
             repository.getChildren(path, volId)
         },
         prefsRepo.scanHiddenFiles,
-        prefsRepo.excludedFolders,
         _sortOrder
-    ) { children, showHidden, excluded, sort ->
-        val filtered = filterHiddenAndExcluded(children, showHidden, excluded)
+    ) { children, showHidden, sort ->
+        val filtered = filterForDisplay(children, showHidden)
         filtered.sortedWith(sort.comparator(keepDirectoriesFirst = true))
     }.stateIn(
         scope = viewModelScope,
@@ -296,10 +283,9 @@ class ExploreViewModel(application: Application) : AndroidViewModel(application)
             repository.getAllNonDirectoryFiles(volId)
         },
         prefsRepo.scanHiddenFiles,
-        prefsRepo.excludedFolders,
         _sortOrder
-    ) { files, showHidden, excluded, sort ->
-        val filtered = filterHiddenAndExcluded(files, showHidden, excluded)
+    ) { files, showHidden, sort ->
+        val filtered = filterForDisplay(files, showHidden)
         filtered.sortedWith(sort.comparator(keepDirectoriesFirst = false))
     }.stateIn(
         scope = viewModelScope,
@@ -369,13 +355,16 @@ class ExploreViewModel(application: Application) : AndroidViewModel(application)
     fun toggleShowHiddenFiles() {
         viewModelScope.launch {
             val current = try { prefsRepo.scanHiddenFiles.first() } catch (e: Exception) { false }
-            prefsRepo.setScanHiddenFiles(!current)
+            setShowHiddenFiles(!current)
         }
     }
 
     fun setShowHiddenFiles(show: Boolean) {
         viewModelScope.launch {
-            prefsRepo.setScanHiddenFiles(show)
+            if (prefsRepo.scanHiddenFiles.first() != show) {
+                prefsRepo.setScanHiddenFiles(show)
+                _userMessage.value = "Hidden-file setting saved. Run Analyze Storage again to update scanned files."
+            }
         }
     }
 

@@ -28,7 +28,9 @@ sealed class ScanState {
     data class Completed(
         val totalFiles: Long,
         val totalBytes: Long,
-        val durationMs: Long
+        val durationMs: Long,
+        val unreadableDirectories: Long = 0,
+        val excludedEntries: Long = 0
     ) : ScanState()
     data class Error(val message: String) : ScanState()
     data object Cancelled : ScanState()

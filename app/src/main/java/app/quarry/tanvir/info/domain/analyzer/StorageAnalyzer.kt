@@ -30,11 +30,46 @@ data class StorageOverviewData(
     val categoryBreakdown: List<StorageCategoryData> = emptyList(),
     val quickInsights: List<QuickInsight> = emptyList(),
     val storageGrowthText: String? = null,
-    val totalFiles: Long = 0
+    val totalFiles: Long = 0,
+    val indexedBytes: Long = 0,
+    val unindexedUsedBytes: Long = 0,
+    val hasScanSnapshot: Boolean = false,
+    val unreadableDirectories: Long = 0,
+    val excludedEntries: Long = 0
+)
+
+enum class StorageSegmentKind { INDEXED, UNINDEXED, FREE }
+
+data class StorageBarSegment(
+    val kind: StorageSegmentKind,
+    val fraction: Float,
+    val category: StorageCategory? = null
 )
 
 object StorageAnalyzer {
 
+    /** All segments share total capacity as denominator; no minimum visual area. */
+    fun storageBarSegments(overview: StorageOverviewData): List<StorageBarSegment> {
+        if (overview.totalBytes <= 0) return emptyList()
+        val total = overview.totalBytes.toDouble()
+        val knownUsed = overview.indexedBytes.coerceAtMost(overview.usedBytes).coerceAtLeast(0L)
+        return buildList {
+            overview.categoryBreakdown.filter { it.totalBytes > 0 }.forEach { category ->
+                val fraction = if (overview.indexedBytes > 0) {
+                    category.totalBytes.toDouble() / overview.indexedBytes * knownUsed / total
+                } else 0.0
+                if (fraction > 0) add(StorageBarSegment(StorageSegmentKind.INDEXED, fraction.toFloat(), category.category))
+            }
+            if (overview.unindexedUsedBytes > 0) {
+                add(StorageBarSegment(StorageSegmentKind.UNINDEXED, (overview.unindexedUsedBytes / total).toFloat()))
+            }
+            if (overview.freeBytes > 0) {
+                add(StorageBarSegment(StorageSegmentKind.FREE, (overview.freeBytes / total).toFloat()))
+            }
+        }
+    }
+
+    @Suppress("UNUSED_PARAMETER") // App statistics are deliberately excluded in analysis-only builds.
     fun calculateOverview(
         volumeName: String,
         volumePath: String,
@@ -54,23 +89,20 @@ object StorageAnalyzer {
         duplicatesSize: Long = 0L,
         duplicatesCount: Long = 0L
     ): StorageOverviewData {
-        val usedBytes = (totalBytes - freeBytes).coerceAtLeast(0L)
-        val usedPercentage = if (totalBytes > 0) (usedBytes.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f) else 0f
+        val capacity = totalBytes.coerceAtLeast(0L)
+        val available = freeBytes.coerceIn(0L, capacity)
+        val usedBytes = capacity - available
+        val usedPercentage = if (capacity > 0) (usedBytes.toFloat() / capacity.toFloat()).coerceIn(0f, 1f) else 0f
 
         val statsMap = categoryStats.associate { it.category to it }
 
         var totalFilesCount = 0L
-        val effectiveCategories = if (isPrimary) StorageCategory.entries else StorageCategory.entries.filter { it != StorageCategory.APPS }
+        val effectiveCategories = StorageCategory.entries.filter { it != StorageCategory.APPS }
         val categoryDataList = effectiveCategories.map { category ->
-            val (catBytes, catCount) = if (category == StorageCategory.APPS) {
-                appsSize to appsCount
-            } else {
-                val stat = statsMap[category.name]
-                (stat?.totalBytes ?: 0L) to (stat?.fileCount ?: 0L)
-            }
-            if (category != StorageCategory.APPS) {
-                totalFilesCount += catCount
-            }
+            val stat = statsMap[category.name]
+            val catBytes = (stat?.totalBytes ?: 0L).coerceAtLeast(0L)
+            val catCount = (stat?.fileCount ?: 0L).coerceAtLeast(0L)
+            totalFilesCount += catCount
             val pct = if (usedBytes > 0) (catBytes.toFloat() / usedBytes.toFloat()).coerceIn(0f, 1f) else 0f
 
             StorageCategoryData(
@@ -134,6 +166,8 @@ object StorageAnalyzer {
         // Calculate growth comparison if snapshots for this specific volume are available (Option 1)
         var growthText: String? = null
         val volumeSnapshots = snapshots.filter { it.volumePath == volumePath }
+        val latestSnapshot = volumeSnapshots.maxByOrNull { it.timestamp }
+        val indexedBytes = categoryDataList.sumOf { it.totalBytes }
         if (volumeSnapshots.size >= 2) {
             val latest = volumeSnapshots[0]
             val previous = volumeSnapshots[1]
@@ -151,14 +185,19 @@ object StorageAnalyzer {
         return StorageOverviewData(
             volumeName = volumeName,
             volumePath = volumePath,
-            totalBytes = totalBytes,
+            totalBytes = capacity,
             usedBytes = usedBytes,
-            freeBytes = freeBytes,
+            freeBytes = available,
             usedPercentage = usedPercentage,
             categoryBreakdown = categoryDataList,
             quickInsights = insights,
             storageGrowthText = growthText,
-            totalFiles = totalFilesCount
+            totalFiles = totalFilesCount,
+            indexedBytes = indexedBytes,
+            unindexedUsedBytes = (usedBytes - indexedBytes).coerceAtLeast(0L),
+            hasScanSnapshot = latestSnapshot != null,
+            unreadableDirectories = latestSnapshot?.unreadableDirectories ?: 0L,
+            excludedEntries = latestSnapshot?.excludedEntries ?: 0L
         )
     }
 }

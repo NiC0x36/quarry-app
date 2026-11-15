@@ -2,47 +2,20 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- All Files Access (Primary access for internal storage & direct-access SD) -->
+    <!-- All-files access is required for folder analysis. User files are never modified. -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="29"
-        tools:ignore="ScopedStorage" />
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
 
-    <!-- Biometric Authentication -->
-    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <!-- Fail closed if a dependency ever requests network or installation access. -->
+    <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" tools:node="remove" />
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:node="remove" tools:ignore="ProtectedPermissions" />
+    <uses-permission-sdk-23 android:name="android.permission.INTERNET" tools:node="remove" />
+    <uses-permission-sdk-23 android:name="android.permission.REQUEST_INSTALL_PACKAGES" tools:node="remove" />
+    <uses-permission-sdk-23 android:name="android.permission.PACKAGE_USAGE_STATS" tools:node="remove" tools:ignore="ProtectedPermissions" />
 
     <!-- Haptics (normal permission, no runtime prompt) -->
     <uses-permission android:name="android.permission.VIBRATE" />
-
-    <!-- Package Installer for APK installations -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-
-    <!-- App Manager: detailed app sizes via usage access (optional, graceful fallback to APK-only sizes) -->
-    <uses-permission
-        android:name="android.permission.PACKAGE_USAGE_STATS"
-        tools:ignore="ProtectedPermissions" />
-
-    <!-- Discover launchable apps without QUERY_ALL_PACKAGES (Play-policy safe) -->
-    <queries>
-        <intent>
-            <action android:name="android.intent.action.MAIN" />
-            <category android:name="android.intent.category.LAUNCHER" />
-        </intent>
-        <intent>
-            <action android:name="android.intent.action.UNINSTALL_PACKAGE" />
-            <data android:scheme="package" />
-        </intent>
-        <intent>
-            <action android:name="android.intent.action.DELETE" />
-            <data android:scheme="package" />
-        </intent>
-    </queries>
 
     <!-- WorkManager Scan Notifications & Foreground Service -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -51,13 +24,14 @@
 
     <application
         android:name=".QuarryApp"
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Quarry"
-        android:requestLegacyExternalStorage="true"
         tools:targetApi="36">
 
         <activity
@@ -77,15 +51,6 @@
             android:foregroundServiceType="dataSync"
             tools:node="merge" />
 
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.fileprovider"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths" />
-        </provider>
     </application>
 
 </manifest>

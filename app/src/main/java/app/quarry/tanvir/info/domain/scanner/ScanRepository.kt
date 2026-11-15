@@ -27,7 +27,8 @@ import java.io.File
 class ScanRepository(
     private val database: QuarryDatabase,
     private val scanner: FastStorageScanner = FastStorageScanner(),
-    private val userPreferences: UserPreferencesRepository? = null
+    private val userPreferences: UserPreferencesRepository? = null,
+    private val privateStoragePaths: Set<String> = emptySet()
 ) {
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var scanJob: Job? = null
@@ -93,7 +94,7 @@ class ScanRepository(
                 )
 
                 val estimatedTotalBytes = FastStorageScanner.getUsedStorageBytes(rootDirectory)
-                val scanHidden = try { userPreferences?.scanHiddenFiles?.first() ?: false } catch (e: Exception) { false }
+                val scanHidden = try { userPreferences?.scanHiddenFiles?.first() ?: true } catch (e: Exception) { true }
                 val excluded = try { userPreferences?.excludedFolders?.first() ?: emptySet() } catch (e: Exception) { emptySet() }
 
                 scanner.scanStorage(
@@ -102,7 +103,7 @@ class ScanRepository(
                     volumeName = volumeName,
                     estimatedTotalBytes = estimatedTotalBytes,
                     includeHiddenFiles = scanHidden,
-                    excludedPaths = excluded
+                    excludedPaths = excluded + privateStoragePaths
                 ).collect { update ->
                     when (update) {
                         is ScanProgressUpdate.Progress -> {
@@ -135,14 +136,18 @@ class ScanRepository(
                                 archivesBytes = statsMap[StorageCategory.ARCHIVES.name] ?: 0L,
                                 apksBytes = statsMap[StorageCategory.APKS.name] ?: 0L,
                                 otherBytes = statsMap[StorageCategory.OTHER.name] ?: 0L,
-                                scanDurationMs = update.result.durationMs
+                                scanDurationMs = update.result.durationMs,
+                                unreadableDirectories = update.result.unreadableDirectories,
+                                excludedEntries = update.result.excludedEntries
                             )
                             database.scanSnapshotDao().insertSnapshot(snapshot)
 
                             _scanState.value = ScanState.Completed(
                                 totalFiles = update.result.totalFiles,
                                 totalBytes = update.result.totalBytes,
-                                durationMs = update.result.durationMs
+                                durationMs = update.result.durationMs,
+                                unreadableDirectories = update.result.unreadableDirectories,
+                                excludedEntries = update.result.excludedEntries
                             )
                         }
                     }
@@ -200,9 +205,17 @@ class ScanRepository(
 
         fun getInstance(context: Context): ScanRepository {
             return INSTANCE ?: synchronized(this) {
+                INSTANCE?.let { return@synchronized it }
                 val db = QuarryDatabase.getInstance(context)
                 val prefs = UserPreferencesRepository.getInstance(context)
-                val instance = ScanRepository(db, userPreferences = prefs)
+                val privatePaths = buildSet {
+                    add(context.filesDir.absolutePath)
+                    add(context.cacheDir.absolutePath)
+                    add(context.noBackupFilesDir.absolutePath)
+                    context.getExternalFilesDirs(null).filterNotNull().forEach { add(it.absolutePath) }
+                    context.externalCacheDirs.filterNotNull().forEach { add(it.absolutePath) }
+                }
+                val instance = ScanRepository(db, userPreferences = prefs, privateStoragePaths = privatePaths)
                 INSTANCE = instance
                 instance
             }

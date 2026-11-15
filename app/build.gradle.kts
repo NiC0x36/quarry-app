@@ -13,11 +13,11 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "app.quarry.tanvir.info"
+        applicationId = "io.github.nic0x36.quarry.local"
         minSdk = 31
         targetSdk = 36
         versionCode = 1
-        versionName = "3.4.5"
+        versionName = "0.1.0-local"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

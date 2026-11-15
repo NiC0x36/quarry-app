@@ -88,7 +88,7 @@ fun PermissionBanner(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "Required for full filesystem analysis",
+                        text = "Read folder sizes in accessible storage",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

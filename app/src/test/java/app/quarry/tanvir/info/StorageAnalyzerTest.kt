@@ -3,6 +3,7 @@ package app.quarry.tanvir.info
 import app.quarry.tanvir.info.data.database.CategoryStat
 import app.quarry.tanvir.info.data.database.ScanSnapshotEntity
 import app.quarry.tanvir.info.domain.analyzer.StorageAnalyzer
+import app.quarry.tanvir.info.domain.analyzer.StorageSegmentKind
 import app.quarry.tanvir.info.domain.model.StorageCategory
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -61,8 +62,46 @@ class StorageAnalyzerTest {
         assertEquals(usedBytes, overview.usedBytes)
         assertEquals(freeBytes, overview.freeBytes)
         assertEquals(3800L, overview.totalFiles)
-        assertEquals(8, overview.categoryBreakdown.size)
-        assertTrue(overview.storageGrowthText?.contains("+2.0 GB") == true)
+        assertEquals(7, overview.categoryBreakdown.size)
+        assertTrue(overview.storageGrowthText?.contains("added since last scan") == true)
         assertEquals(2, overview.quickInsights.size)
+    }
+
+    @Test
+    fun unindexedUsedSpaceKeepsItsShareOfTotalCapacity() {
+        val gb = 1_000_000_000L
+        val overview = StorageAnalyzer.calculateOverview(
+            volumeName = "Test", volumePath = "/test", totalBytes = 100 * gb,
+            freeBytes = 10 * gb,
+            categoryStats = listOf(CategoryStat(StorageCategory.VIDEOS.name, 20 * gb, 2)),
+            snapshots = emptyList(),
+            appsSize = 50 * gb, appsCount = 5 // Deliberately ignored in file-only mode.
+        )
+        assertEquals(90 * gb, overview.usedBytes)
+        assertEquals(20 * gb, overview.indexedBytes)
+        assertEquals(70 * gb, overview.unindexedUsedBytes)
+        assertTrue(overview.categoryBreakdown.none { it.category == StorageCategory.APPS })
+        val segments = StorageAnalyzer.storageBarSegments(overview)
+        assertEquals(0.2f, segments.single { it.kind == StorageSegmentKind.INDEXED }.fraction, 0.0001f)
+        assertEquals(0.7f, segments.single { it.kind == StorageSegmentKind.UNINDEXED }.fraction, 0.0001f)
+        assertEquals(0.1f, segments.single { it.kind == StorageSegmentKind.FREE }.fraction, 0.0001f)
+        assertEquals(1f, segments.sumOf { it.fraction.toDouble() }.toFloat(), 0.0001f)
+    }
+
+    @Test
+    fun scanCoverageBelongsToTheSelectedVolume() {
+        val snapshot = ScanSnapshotEntity(
+            volumePath = "/test", volumeName = "Test", totalDeviceBytes = 100,
+            usedBytes = 90, freeBytes = 10, totalFiles = 1,
+            unreadableDirectories = 3, excludedEntries = 2
+        )
+        val overview = StorageAnalyzer.calculateOverview(
+            volumeName = "Test", volumePath = "/test", totalBytes = 100, freeBytes = 10,
+            categoryStats = emptyList(),
+            snapshots = listOf(snapshot, snapshot.copy(volumePath = "/other", unreadableDirectories = 99))
+        )
+        assertTrue(overview.hasScanSnapshot)
+        assertEquals(3L, overview.unreadableDirectories)
+        assertEquals(2L, overview.excludedEntries)
     }
 }

@@ -7,10 +7,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -22,7 +20,6 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DarkMode
-import androidx.compose.material.icons.rounded.Fingerprint
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.SdStorage
 import androidx.compose.material.icons.rounded.Tune
@@ -37,8 +34,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,7 +47,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import app.quarry.tanvir.info.data.preferences.ThemeMode
 
 import android.content.pm.PackageManager
 import android.os.Build
@@ -131,15 +127,6 @@ fun SettingsScreen(
             onClick = { viewModel.showThemeDialog() }
         )
 
-        // 2. Security & Biometrics
-        SettingsSwitchItem(
-            icon = Icons.Rounded.Fingerprint,
-            title = "Biometric Lock",
-            subtitle = "Protect trash, delete, rename",
-            checked = uiState.isBiometricEnabled,
-            onCheckedChange = { viewModel.toggleBiometricProtection(activity, it) }
-        )
-
         // 3. Scan & Exclusions
         val exclusionsSubtitle = if (uiState.excludedFolders.isEmpty()) "None excluded" else "${uiState.excludedFolders.size} excluded"
         SettingsActionItem(
@@ -152,8 +139,8 @@ fun SettingsScreen(
         // 4. Hidden Files & Folders
         SettingsSwitchItem(
             icon = if (uiState.scanHiddenFiles) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
-            title = "Show Hidden Files",
-            subtitle = if (uiState.scanHiddenFiles) "Hidden items visible" else "Hidden items hidden",
+            title = "Include hidden files in next scan",
+            subtitle = "Run Analyze Storage after changing this setting",
             checked = uiState.scanHiddenFiles,
             onCheckedChange = { viewModel.setScanHiddenFiles(it) }
         )

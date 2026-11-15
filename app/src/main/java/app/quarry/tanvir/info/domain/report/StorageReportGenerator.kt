@@ -1,7 +1,6 @@
 package app.quarry.tanvir.info.domain.report
 
 import android.content.Context
-import android.content.Intent
 import app.quarry.tanvir.info.data.database.CategoryStat
 import app.quarry.tanvir.info.data.database.FileEntity
 import app.quarry.tanvir.info.data.database.ScanSnapshotEntity
@@ -93,15 +92,6 @@ object StorageReportGenerator {
         return sb.toString()
     }
 
-    fun shareReport(context: Context, reportText: String) {
-        val sendIntent = Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(Intent.EXTRA_SUBJECT, "Quarry Storage Analysis Report")
-            putExtra(Intent.EXTRA_TEXT, reportText)
-        }
-        val chooser = Intent.createChooser(sendIntent, "Share Storage Report").apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        context.startActivity(chooser)
-    }
+    @Suppress("UNUSED_PARAMETER")
+    fun shareReport(context: Context, reportText: String) = Unit
 }

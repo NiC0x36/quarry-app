@@ -50,6 +50,8 @@ fun CategoryVisibilityDialog(
     onDismiss: () -> Unit
 ) {
     val haptics = app.quarry.tanvir.info.domain.haptics.LocalQuarryHaptics.current
+    val supportedCategories = StorageCategory.entries.filter { it != StorageCategory.APPS }
+    val visibleCount = supportedCategories.count { it.name in enabledCategories }
 
     QuarryFullScreenDialog(
         onDismissRequest = onDismiss
@@ -95,14 +97,14 @@ fun CategoryVisibilityDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    text = "${enabledCategories.size} of ${StorageCategory.entries.size} visible · At least 4 required",
+                    text = "${visibleCount} of ${supportedCategories.size} visible · At least 4 required",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
                 )
-                StorageCategory.entries.forEach { category ->
+                supportedCategories.forEach { category ->
                     val enabled = enabledCategories.contains(category.name)
-                    val canDisable = enabledCategories.size > 4 || !enabled
+                    val canDisable = visibleCount > 4 || !enabled
                     CategoryToggleRow(
                         category = category,
                         enabled = enabled,

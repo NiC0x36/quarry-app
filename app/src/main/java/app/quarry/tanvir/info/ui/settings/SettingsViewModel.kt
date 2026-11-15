@@ -7,7 +7,6 @@ import androidx.fragment.app.FragmentActivity
 import app.quarry.tanvir.info.data.preferences.ThemeMode
 import app.quarry.tanvir.info.data.preferences.UserPreferencesRepository
 import app.quarry.tanvir.info.domain.security.BiometricSecurityManager
-import app.quarry.tanvir.info.domain.scanner.ScanRepository
 import app.quarry.tanvir.info.domain.volume.StorageVolumeInfo
 import app.quarry.tanvir.info.domain.volume.StorageVolumeManager
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,7 +22,7 @@ data class SettingsUiState(
     val isBiometricEnabled: Boolean = true,
     val deleteCountdownSeconds: Int = 5,
     val excludedFolders: Set<String> = emptySet(),
-    val scanHiddenFiles: Boolean = false,
+    val scanHiddenFiles: Boolean = true,
     val detectedVolumes: List<StorageVolumeInfo> = emptyList(),
     val isQuickInsightsEnabled: Boolean = true,
     val enabledCategories: Set<String> = emptySet(),
@@ -42,7 +41,6 @@ data class SettingsUiState(
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
 
     private val prefsRepo = UserPreferencesRepository.getInstance(application)
-    private val repository = ScanRepository.getInstance(application)
     private val volumeManager = StorageVolumeManager.getInstance(application)
     private val securityManager = BiometricSecurityManager(application)
 
@@ -189,26 +187,28 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setScanHiddenFiles(enabled: Boolean) {
         viewModelScope.launch {
             prefsRepo.setScanHiddenFiles(enabled)
+            _userMessage.value = "Scan setting saved. Run Analyze Storage to rebuild the index with this setting."
         }
     }
 
     fun addExclusion(path: String) {
         viewModelScope.launch {
             prefsRepo.addExcludedFolder(path)
-            repository.purgeExcludedFiles(setOf(path))
+            _userMessage.value = "Exclusion saved for the next scan. Run Analyze Storage to update folder sizes."
         }
     }
 
     fun addExclusions(paths: Collection<String>) {
         viewModelScope.launch {
             prefsRepo.addExcludedFolders(paths)
-            repository.purgeExcludedFiles(paths.toSet())
+            _userMessage.value = "Exclusions saved for the next scan. Run Analyze Storage to update folder sizes."
         }
     }
 
     fun removeExclusion(path: String) {
         viewModelScope.launch {
             prefsRepo.removeExcludedFolder(path)
+            _userMessage.value = "Exclusion removed. Run Analyze Storage to include this folder again."
         }
     }
 

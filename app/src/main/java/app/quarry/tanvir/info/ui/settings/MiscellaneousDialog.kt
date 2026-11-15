@@ -256,7 +256,7 @@ fun MiscellaneousDialog(
                                 fontWeight = FontWeight.SemiBold
                             )
                             Text(
-                                text = "${enabledCategories.size} of 8 categories active",
+                                text = "${enabledCategories.count { it != "APPS" }} of 7 categories active",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

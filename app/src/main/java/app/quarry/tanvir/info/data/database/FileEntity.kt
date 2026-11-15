@@ -3,6 +3,9 @@ package app.quarry.tanvir.info.data.database
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import androidx.room.Ignore
+import androidx.room.ColumnInfo
+import app.quarry.tanvir.info.domain.scanner.DirectoryScanStatus
 
 @Entity(
     tableName = "files",
@@ -35,8 +38,23 @@ data class FileEntity(
     val isDownload: Boolean = false,
     val directChildrenCount: Int = 0,
     val partialHash: String? = null,
-    val fullHash: String? = null
-)
+    val fullHash: String? = null,
+    @ColumnInfo(defaultValue = "'PARTIAL'")
+    val scanStatus: String = DirectoryScanStatus.COMPLETE
+) {
+    @get:Ignore
+    val hasIncompleteScan: Boolean
+        get() = scanStatus != DirectoryScanStatus.COMPLETE
+
+    @get:Ignore
+    val scanStatusDescription: String
+        get() = when (scanStatus) {
+            DirectoryScanStatus.UNREADABLE -> "Not readable · size unknown"
+            DirectoryScanStatus.EXCLUDED -> "Excluded from scan · size unknown"
+            DirectoryScanStatus.PARTIAL -> "Partial scan · known size only"
+            else -> "Scanned"
+        }
+}
 
 data class CategoryStat(
     val category: String,

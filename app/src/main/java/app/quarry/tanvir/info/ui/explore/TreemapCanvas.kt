@@ -32,7 +32,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -58,7 +57,7 @@ private const val MAX_SCALE = 5f
 
 /**
  * Responsive, hardware-accelerated Treemap Canvas.
- * - Every individual file and folder is rendered with distinct, vibrant, harmonized colors.
+ * - Rectangle areas represent bytes, without minimum-size visual inflation.
  * - Fluid navigation animations provide visual continuity when drilling down into or popping out of folders.
  * - Tactile press feedback highlights tapped tiles with a luminous pulse.
  * - Smooth animated zoom reset on double-tap and seamless gesture panning/zooming.
@@ -334,8 +333,6 @@ fun TreemapCanvas(
                             )
                     ) {
                         val strokeWidthPx = (1.0.dp.toPx() / scale).coerceAtLeast(0.5f)
-                        val cornerRadiusPx = (6.dp.toPx() / scale.coerceAtLeast(1f)).coerceAtLeast(2f / scale)
-                        val cornerRadius = CornerRadius(cornerRadiusPx, cornerRadiusPx)
 
                         val baseTitleSize = density.run { 11.5.dp.toPx() }
                         val baseSubtextSize = density.run { 9.5.dp.toPx() }
@@ -370,38 +367,38 @@ fun TreemapCanvas(
                             val w = rect.width
                             val h = rect.height
 
-                            if (w > 2f && h > 2f) {
+                            if (node.size > 0L && w > 0f && h > 0f) {
                                 val (colorTop, colorBottom) = getTreemapTileColors(
                                     node = node,
                                     index = index,
                                     isDark = isDark
                                 )
 
-                                val halfStroke = strokeWidthPx / 2f
-                                val drawRectTopLeft = Offset(rect.left + halfStroke, rect.top + halfStroke)
-                                val drawRectSize = Size(
-                                    (w - strokeWidthPx).coerceAtLeast(0.5f),
-                                    (h - strokeWidthPx).coerceAtLeast(0.5f)
-                                )
+                                // Paint the actual measured rectangle, including subpixel tiles.
+                                // Enlarged touch targets below never alter these dimensions.
+                                val drawRectTopLeft = Offset(rect.left, rect.top)
+                                val drawRectSize = Size(w, h)
 
-                                drawRoundRect(
+                                drawRect(
                                     brush = Brush.verticalGradient(
                                         colors = listOf(colorTop, colorBottom),
                                         startY = rect.top,
                                         endY = rect.bottom
                                     ),
                                     topLeft = drawRectTopLeft,
-                                    size = drawRectSize,
-                                    cornerRadius = cornerRadius
+                                    size = drawRectSize
                                 )
 
-                                drawRoundRect(
-                                    color = borderColor,
-                                    topLeft = drawRectTopLeft,
-                                    size = drawRectSize,
-                                    cornerRadius = cornerRadius,
-                                    style = Stroke(width = strokeWidthPx)
-                                )
+                                val canDrawBorder = w > strokeWidthPx * 2f && h > strokeWidthPx * 2f
+                                if (canDrawBorder) {
+                                    val halfStroke = strokeWidthPx / 2f
+                                    drawRect(
+                                        color = borderColor,
+                                        topLeft = Offset(rect.left + halfStroke, rect.top + halfStroke),
+                                        size = Size(w - strokeWidthPx, h - strokeWidthPx),
+                                        style = Stroke(width = strokeWidthPx)
+                                    )
+                                }
 
                                 val visualW = w * scale
                                 val visualH = h * scale
@@ -471,19 +468,20 @@ fun TreemapCanvas(
 
                                 // Render glowing tactile feedback on actively pressed / tapped tile
                                 if (node == pressedNode) {
-                                    drawRoundRect(
+                                    drawRect(
                                         color = Color.White.copy(alpha = 0.28f),
                                         topLeft = drawRectTopLeft,
-                                        size = drawRectSize,
-                                        cornerRadius = cornerRadius
+                                        size = drawRectSize
                                     )
-                                    drawRoundRect(
-                                        color = Color.White.copy(alpha = 0.60f),
-                                        topLeft = drawRectTopLeft,
-                                        size = drawRectSize,
-                                        cornerRadius = cornerRadius,
-                                        style = Stroke(width = strokeWidthPx * 1.5f)
-                                    )
+                                    if (canDrawBorder) {
+                                        val feedbackStroke = strokeWidthPx * 1.5f
+                                        drawRect(
+                                            color = Color.White.copy(alpha = 0.60f),
+                                            topLeft = Offset(rect.left + feedbackStroke / 2f, rect.top + feedbackStroke / 2f),
+                                            size = Size(w - feedbackStroke, h - feedbackStroke),
+                                            style = Stroke(width = feedbackStroke)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -500,9 +498,11 @@ private fun findBestMatchingNode(
     y: Float,
     touchRadiusPx: Float
 ): TreemapNode? {
-    if (nodes.isEmpty()) return null
+    if (!x.isFinite() || !y.isFinite()) return null
+    val pickableNodes = nodes.filter { it.size > 0L && it.rect.width > 0f && it.rect.height > 0f }
+    if (pickableNodes.isEmpty()) return null
 
-    val directHits = nodes.filter { node ->
+    val directHits = pickableNodes.filter { node ->
         x >= node.rect.left && x <= node.rect.right &&
                 y >= node.rect.top && y <= node.rect.bottom
     }
@@ -510,7 +510,8 @@ private fun findBestMatchingNode(
     if (directHits.isNotEmpty()) {
         val smallestDirect = directHits.minByOrNull { it.rect.width * it.rect.height }
 
-        val nearbySmallNode = nodes
+        // Only the touch target grows for a small tile; its rendered area stays proportional.
+        val nearbySmallNode = pickableNodes
             .filter { node ->
                 val dist = distanceToRect(x, y, node.rect)
                 dist <= touchRadiusPx && (node.rect.width * node.rect.height < (smallestDirect?.let { it.rect.width * it.rect.height * 0.3f } ?: Float.MAX_VALUE))
@@ -524,7 +525,7 @@ private fun findBestMatchingNode(
         return smallestDirect
     }
 
-    val candidate = nodes.minByOrNull { distanceToRect(x, y, it.rect) }
+    val candidate = pickableNodes.minByOrNull { distanceToRect(x, y, it.rect) }
     if (candidate != null && distanceToRect(x, y, candidate.rect) <= touchRadiusPx * 1.5f) {
         return candidate
     }

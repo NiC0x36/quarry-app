@@ -5,6 +5,7 @@ import android.os.StatFs
 import app.quarry.tanvir.info.data.database.FileEntity
 import app.quarry.tanvir.info.domain.model.StorageCategory
 import app.quarry.tanvir.info.domain.scanner.FolderScanStatus
+import app.quarry.tanvir.info.domain.scanner.DirectoryScanStatus
 import app.quarry.tanvir.info.domain.scanner.ScanProgress
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
@@ -15,13 +16,19 @@ import java.io.File
 import java.util.ArrayDeque
 import java.util.Locale
 
-class FastStorageScanner {
+class FastStorageScanner(
+    private val directoryLister: (File) -> Array<File>? = { directory ->
+        directory.listFiles() ?: directory.list()?.map { File(directory, it) }?.toTypedArray()
+    }
+) {
 
     data class ScanResult(
         val files: List<FileEntity>,
         val totalFiles: Long,
         val totalBytes: Long,
-        val durationMs: Long
+        val durationMs: Long,
+        val unreadableDirectories: Long = 0,
+        val excludedEntries: Long = 0
     )
 
     fun scanStorage(
@@ -29,17 +36,20 @@ class FastStorageScanner {
         volumeId: String = "internal_storage",
         volumeName: String = "Internal Storage",
         estimatedTotalBytes: Long = getUsedStorageBytes(rootDirectory),
-        includeHiddenFiles: Boolean = false,
+        includeHiddenFiles: Boolean = true,
         excludedPaths: Set<String> = emptySet()
     ): Flow<ScanProgressUpdate> = flow {
         val startTime = System.currentTimeMillis()
         var scannedFilesCount = 0L
         var scannedBytesCount = 0L
         var lastEmitTime = 0L
+        var unreadableDirectories = 0L
+        var excludedEntries = 0L
 
         val entitiesList = mutableListOf<FileEntity>()
         val directorySizeMap = mutableMapOf<String, Long>()
         val directoryDirectCountMap = mutableMapOf<String, Int>()
+        val directoryStatuses = mutableMapOf<String, String>()
 
         // Post-order processing list for calculating directory total sizes accurately
         val discoveredDirectories = mutableListOf<File>()
@@ -49,11 +59,6 @@ class FastStorageScanner {
 
         // Top level folder status tracker for visual progress (e.g. Download, DCIM, Pictures, Android, etc.)
         val topLevelFolders = mutableMapOf<String, Boolean>()
-        rootDirectory.listFiles()?.filter { it.isDirectory }?.forEach {
-            if (includeHiddenFiles || (!it.name.startsWith(".") && !it.isHidden)) {
-                topLevelFolders[it.name] = false
-            }
-        }
 
         while (queue.isNotEmpty()) {
             if (!currentCoroutineContext().isActive) {
@@ -63,15 +68,14 @@ class FastStorageScanner {
             val currentDir = queue.removeFirst()
             discoveredDirectories.add(currentDir)
 
-            val currentParentPath = currentDir.parentFile?.absolutePath
+            directoryStatuses.putIfAbsent(currentDir.absolutePath, DirectoryScanStatus.COMPLETE)
             val isTopLevel = currentDir.parentFile?.absolutePath == rootDirectory.absolutePath
             if (isTopLevel) {
                 topLevelFolders[currentDir.name] = false
             }
 
             val children = try {
-                currentDir.listFiles()
-                    ?: currentDir.list()?.map { File(currentDir, it) }?.toTypedArray()
+                directoryLister(currentDir)
             } catch (e: Exception) {
                 null
             }
@@ -83,18 +87,21 @@ class FastStorageScanner {
                         throw CancellationException("Scan cancelled by user")
                     }
 
-                    // Check if hidden files/folders should be skipped
                     val isHiddenItem = child.name.startsWith(".") || child.isHidden
-                    if (!includeHiddenFiles && isHiddenItem) {
-                        continue
-                    }
-
-                    // Check if folder or file is explicitly excluded
-                    if (app.quarry.tanvir.info.domain.scanner.ExclusionMatcher.isExcluded(child.absolutePath, excludedPaths)) {
+                    val isExcluded = (!includeHiddenFiles && isHiddenItem) ||
+                        app.quarry.tanvir.info.domain.scanner.ExclusionMatcher.isExcluded(child.absolutePath, excludedPaths)
+                    if (isExcluded) {
+                        excludedEntries++
+                        directoryStatuses[currentDir.absolutePath] = DirectoryScanStatus.PARTIAL
+                        if (child.isDirectory) {
+                            discoveredDirectories.add(child)
+                            directoryStatuses[child.absolutePath] = DirectoryScanStatus.EXCLUDED
+                        }
                         continue
                     }
 
                     if (child.isDirectory) {
+                        if (currentDir == rootDirectory) topLevelFolders[child.name] = false
                         queue.addLast(child)
                         directFilesAndFoldersCount++
                     } else {
@@ -149,6 +156,9 @@ class FastStorageScanner {
                     }
                 }
                 directoryDirectCountMap[currentDir.absolutePath] = directFilesAndFoldersCount
+            } else {
+                directoryStatuses[currentDir.absolutePath] = DirectoryScanStatus.UNREADABLE
+                unreadableDirectories++
             }
 
             if (isTopLevel) {
@@ -162,9 +172,14 @@ class FastStorageScanner {
             val dirPath = dir.absolutePath
             val dirSize = directorySizeMap[dirPath] ?: 0L
             val parentPath = dir.parentFile?.absolutePath
+            val scanStatus = directoryStatuses[dirPath] ?: DirectoryScanStatus.COMPLETE
 
             if (parentPath != null) {
                 directorySizeMap[parentPath] = (directorySizeMap[parentPath] ?: 0L) + dirSize
+                if (scanStatus != DirectoryScanStatus.COMPLETE &&
+                    directoryStatuses[parentPath] == DirectoryScanStatus.COMPLETE) {
+                    directoryStatuses[parentPath] = DirectoryScanStatus.PARTIAL
+                }
             }
 
             val dirEntity = FileEntity(
@@ -180,7 +195,8 @@ class FastStorageScanner {
                 extension = "",
                 isScreenshot = false,
                 isDownload = isDownloadPath(dirPath),
-                directChildrenCount = directoryDirectCountMap[dirPath] ?: 0
+                directChildrenCount = directoryDirectCountMap[dirPath] ?: 0,
+                scanStatus = scanStatus
             )
             entitiesList.add(dirEntity)
         }
@@ -193,7 +209,9 @@ class FastStorageScanner {
                     files = entitiesList,
                     totalFiles = scannedFilesCount,
                     totalBytes = scannedBytesCount,
-                    durationMs = totalDuration
+                    durationMs = totalDuration,
+                    unreadableDirectories = unreadableDirectories,
+                    excludedEntries = excludedEntries
                 )
             )
         )

@@ -86,6 +86,7 @@ import kotlinx.coroutines.launch
 fun FilterSortBottomSheet(
     currentSort: FileSortOrder,
     showHiddenFiles: Boolean,
+    changesScanInclusion: Boolean = false,
     onApply: (sort: FileSortOrder, showHidden: Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -484,12 +485,13 @@ fun FilterSortBottomSheet(
 
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Show Hidden Files",
+                                text = if (changesScanInclusion) "Show and include hidden files" else "Show indexed hidden files",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.SemiBold
                             )
                             Text(
-                                text = "Includes dotfiles and hidden system directories",
+                                text = if (changesScanInclusion) "Updates this view. Run Analyze Storage again to rebuild the scan."
+                                    else "Only files already included in the last scan.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

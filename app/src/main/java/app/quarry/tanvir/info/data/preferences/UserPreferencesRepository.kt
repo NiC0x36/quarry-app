@@ -8,11 +8,14 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import app.quarry.tanvir.info.domain.model.StorageCategory
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import java.io.File
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-
-private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "user_preferences")
 
 enum class ThemeMode(val displayName: String) {
     SYSTEM("System Default"),
@@ -20,7 +23,21 @@ enum class ThemeMode(val displayName: String) {
     DARK("Dark Mode")
 }
 
-class UserPreferencesRepository private constructor(private val context: Context) {
+class UserPreferencesRepository private constructor(context: Context) {
+
+    private val supportedCategoryNames = StorageCategory.entries
+        .filter { it != StorageCategory.APPS }.map { it.name }.toSet()
+
+    private fun enabledFileCategories(stored: Set<String>?): Set<String> {
+        val supported = stored.orEmpty().intersect(supportedCategoryNames)
+        return if (supported.size >= 4) supported else supportedCategoryNames
+    }
+
+    // Index settings contain folder paths; keep them outside backup and device transfer.
+    private val dataStore: DataStore<Preferences> = PreferenceDataStoreFactory.create(
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+        produceFile = { File(context.noBackupFilesDir, "user_preferences.preferences_pb") }
+    )
 
     private val THEME_KEY = stringPreferencesKey("theme_mode")
     private val DYNAMIC_COLOR_KEY = booleanPreferencesKey("dynamic_color_enabled")
@@ -36,7 +53,7 @@ class UserPreferencesRepository private constructor(private val context: Context
     private val KEEP_SCREEN_ON_KEY = booleanPreferencesKey("keep_screen_on")
     private val SELECTED_VOLUME_ID_KEY = stringPreferencesKey("selected_volume_id")
 
-    val themeMode: Flow<ThemeMode> = context.dataStore.data.map { preferences ->
+    val themeMode: Flow<ThemeMode> = dataStore.data.map { preferences ->
         val raw = preferences[THEME_KEY] ?: ThemeMode.SYSTEM.name
         try {
             ThemeMode.valueOf(raw)
@@ -45,95 +62,92 @@ class UserPreferencesRepository private constructor(private val context: Context
         }
     }
 
-    val isDynamicColorEnabled: Flow<Boolean> = context.dataStore.data.map { preferences ->
+    val isDynamicColorEnabled: Flow<Boolean> = dataStore.data.map { preferences ->
         preferences[DYNAMIC_COLOR_KEY] ?: false
     }
 
-    val scanHiddenFiles: Flow<Boolean> = context.dataStore.data.map { preferences ->
-        preferences[SCAN_HIDDEN_FILES_KEY] ?: false
+    val scanHiddenFiles: Flow<Boolean> = dataStore.data.map { preferences ->
+        preferences[SCAN_HIDDEN_FILES_KEY] ?: true
     }
 
-    val isOnboardingCompleted: Flow<Boolean> = context.dataStore.data.map { preferences ->
+    val isOnboardingCompleted: Flow<Boolean> = dataStore.data.map { preferences ->
         preferences[ONBOARDING_COMPLETED_KEY] ?: false
     }
 
-    val isBiometricAuthEnabled: Flow<Boolean> = context.dataStore.data.map { preferences ->
+    val isBiometricAuthEnabled: Flow<Boolean> = dataStore.data.map { preferences ->
         preferences[BIOMETRIC_AUTH_KEY] ?: true
     }
 
-    val deleteCountdownSeconds: Flow<Int> = context.dataStore.data.map { preferences ->
+    val deleteCountdownSeconds: Flow<Int> = dataStore.data.map { preferences ->
         preferences[DELETE_COUNTDOWN_KEY] ?: 5
     }
 
-    val excludedFolders: Flow<Set<String>> = context.dataStore.data.map { preferences ->
+    val excludedFolders: Flow<Set<String>> = dataStore.data.map { preferences ->
         preferences[EXCLUDED_FOLDERS_KEY] ?: emptySet()
     }
 
-    val isQuickInsightsEnabled: Flow<Boolean> = context.dataStore.data.map { preferences ->
+    val isQuickInsightsEnabled: Flow<Boolean> = dataStore.data.map { preferences ->
         preferences[QUICK_INSIGHTS_ENABLED_KEY] ?: true
     }
 
-    val enabledCategories: Flow<Set<String>> = context.dataStore.data.map { preferences ->
-        val stored = preferences[ENABLED_CATEGORIES_KEY]
-        if (stored.isNullOrEmpty()) {
-            app.quarry.tanvir.info.domain.model.StorageCategory.entries.map { it.name }.toSet()
-        } else stored
+    val enabledCategories: Flow<Set<String>> = dataStore.data.map { preferences ->
+        enabledFileCategories(preferences[ENABLED_CATEGORIES_KEY])
     }
 
-    val isHapticsEnabled: Flow<Boolean> = context.dataStore.data.map { preferences ->
+    val isHapticsEnabled: Flow<Boolean> = dataStore.data.map { preferences ->
         preferences[HAPTICS_ENABLED_KEY] ?: true
     }
 
-    val hapticStrength: Flow<Int> = context.dataStore.data.map { preferences ->
+    val hapticStrength: Flow<Int> = dataStore.data.map { preferences ->
         (preferences[HAPTIC_STRENGTH_KEY] ?: 60).coerceIn(1, 100)
     }
 
-    val isKeepScreenOn: Flow<Boolean> = context.dataStore.data.map { preferences ->
+    val isKeepScreenOn: Flow<Boolean> = dataStore.data.map { preferences ->
         preferences[KEEP_SCREEN_ON_KEY] ?: false
     }
 
-    val selectedVolumeId: Flow<String> = context.dataStore.data.map { preferences ->
+    val selectedVolumeId: Flow<String> = dataStore.data.map { preferences ->
         preferences[SELECTED_VOLUME_ID_KEY] ?: "internal_storage"
     }
 
     suspend fun setSelectedVolumeId(volumeId: String) {
-        context.dataStore.edit { preferences ->
+        dataStore.edit { preferences ->
             preferences[SELECTED_VOLUME_ID_KEY] = volumeId
         }
     }
 
     suspend fun setThemeMode(mode: ThemeMode) {
-        context.dataStore.edit { preferences ->
+        dataStore.edit { preferences ->
             preferences[THEME_KEY] = mode.name
         }
     }
 
     suspend fun setDynamicColorEnabled(enabled: Boolean) {
-        context.dataStore.edit { preferences ->
+        dataStore.edit { preferences ->
             preferences[DYNAMIC_COLOR_KEY] = enabled
         }
     }
 
     suspend fun setScanHiddenFiles(enabled: Boolean) {
-        context.dataStore.edit { preferences ->
+        dataStore.edit { preferences ->
             preferences[SCAN_HIDDEN_FILES_KEY] = enabled
         }
     }
 
     suspend fun setOnboardingCompleted(completed: Boolean) {
-        context.dataStore.edit { preferences ->
+        dataStore.edit { preferences ->
             preferences[ONBOARDING_COMPLETED_KEY] = completed
         }
     }
 
     suspend fun setBiometricAuthEnabled(enabled: Boolean) {
-        context.dataStore.edit { preferences ->
+        dataStore.edit { preferences ->
             preferences[BIOMETRIC_AUTH_KEY] = enabled
         }
     }
 
     suspend fun setDeleteCountdownSeconds(seconds: Int) {
-        context.dataStore.edit { preferences ->
+        dataStore.edit { preferences ->
             preferences[DELETE_COUNTDOWN_KEY] = seconds.coerceIn(0, 10)
         }
     }
@@ -141,7 +155,7 @@ class UserPreferencesRepository private constructor(private val context: Context
     suspend fun addExcludedFolder(path: String) {
         val trimmed = path.trim()
         if (trimmed.isBlank()) return
-        context.dataStore.edit { preferences ->
+        dataStore.edit { preferences ->
             val current = preferences[EXCLUDED_FOLDERS_KEY] ?: emptySet()
             preferences[EXCLUDED_FOLDERS_KEY] = current + trimmed
         }
@@ -150,31 +164,31 @@ class UserPreferencesRepository private constructor(private val context: Context
     suspend fun addExcludedFolders(paths: Collection<String>) {
         val cleaned = paths.map { it.trim() }.filter { it.isNotBlank() }
         if (cleaned.isEmpty()) return
-        context.dataStore.edit { preferences ->
+        dataStore.edit { preferences ->
             val current = preferences[EXCLUDED_FOLDERS_KEY] ?: emptySet()
             preferences[EXCLUDED_FOLDERS_KEY] = current + cleaned
         }
     }
 
     suspend fun setQuickInsightsEnabled(enabled: Boolean) {
-        context.dataStore.edit { preferences ->
+        dataStore.edit { preferences ->
             preferences[QUICK_INSIGHTS_ENABLED_KEY] = enabled
         }
     }
 
     suspend fun setEnabledCategories(categories: Set<String>) {
-        val cleaned = categories.filter { it.isNotBlank() }.toSet()
+        val cleaned = categories.intersect(supportedCategoryNames)
         if (cleaned.size < 4) return
-        context.dataStore.edit { preferences ->
+        dataStore.edit { preferences ->
             preferences[ENABLED_CATEGORIES_KEY] = cleaned
         }
     }
 
     suspend fun toggleCategory(categoryName: String): Boolean {
+        if (categoryName !in supportedCategoryNames) return false
         var applied = false
-        context.dataStore.edit { preferences ->
-            val current = preferences[ENABLED_CATEGORIES_KEY]
-                ?: app.quarry.tanvir.info.domain.model.StorageCategory.entries.map { it.name }.toSet()
+        dataStore.edit { preferences ->
+            val current = enabledFileCategories(preferences[ENABLED_CATEGORIES_KEY])
             val next = if (current.contains(categoryName)) {
                 if (current.size <= 4) current else current - categoryName
             } else {
@@ -187,25 +201,25 @@ class UserPreferencesRepository private constructor(private val context: Context
     }
 
     suspend fun setHapticsEnabled(enabled: Boolean) {
-        context.dataStore.edit { preferences ->
+        dataStore.edit { preferences ->
             preferences[HAPTICS_ENABLED_KEY] = enabled
         }
     }
 
     suspend fun setHapticStrength(strength: Int) {
-        context.dataStore.edit { preferences ->
+        dataStore.edit { preferences ->
             preferences[HAPTIC_STRENGTH_KEY] = strength.coerceIn(1, 100)
         }
     }
 
     suspend fun setKeepScreenOn(enabled: Boolean) {
-        context.dataStore.edit { preferences ->
+        dataStore.edit { preferences ->
             preferences[KEEP_SCREEN_ON_KEY] = enabled
         }
     }
 
     suspend fun removeExcludedFolder(path: String) {
-        context.dataStore.edit { preferences ->
+        dataStore.edit { preferences ->
             val current = preferences[EXCLUDED_FOLDERS_KEY] ?: emptySet()
             preferences[EXCLUDED_FOLDERS_KEY] = current - path
         }
@@ -217,6 +231,7 @@ class UserPreferencesRepository private constructor(private val context: Context
 
         fun getInstance(context: Context): UserPreferencesRepository {
             return INSTANCE ?: synchronized(this) {
+                INSTANCE?.let { return@synchronized it }
                 val instance = UserPreferencesRepository(context.applicationContext)
                 INSTANCE = instance
                 instance

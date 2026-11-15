@@ -39,6 +39,6 @@ sealed class Screen(
     )
 
     companion object {
-        val bottomNavItems = listOf(Home, Explore, Cleanup, Settings)
+        val bottomNavItems = listOf(Home, Explore, Settings)
     }
 }

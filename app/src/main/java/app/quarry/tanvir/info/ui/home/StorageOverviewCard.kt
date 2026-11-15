@@ -39,11 +39,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.quarry.tanvir.info.domain.analyzer.StorageOverviewData
+import app.quarry.tanvir.info.domain.analyzer.StorageAnalyzer
+import app.quarry.tanvir.info.domain.analyzer.StorageSegmentKind
 import app.quarry.tanvir.info.domain.haptics.LocalQuarryHaptics
 import app.quarry.tanvir.info.domain.model.StorageFormatter
 import app.quarry.tanvir.info.domain.volume.StorageDeviceType
@@ -294,6 +295,38 @@ fun StorageOverviewCard(
                     .height(14.dp)
             )
 
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = "Indexed files: ${StorageFormatter.formatBytes(overview.indexedBytes)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = if (overview.totalBytes > 0) {
+                        "Not indexed / inaccessible: ${StorageFormatter.formatBytes(overview.unindexedUsedBytes)}"
+                    } else "Not indexed / inaccessible: unknown (capacity unavailable)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = if (!overview.hasScanSnapshot) {
+                        "No completed scan yet. App and system storage is not analyzed."
+                    } else {
+                        "${overview.unreadableDirectories} unreadable folders · ${overview.excludedEntries} excluded entries. " +
+                            "The remainder may include app/system data, inaccessible files or storage overhead."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (overview.indexedBytes > overview.usedBytes) {
+                    Text(
+                        text = "Indexed file sizes exceed current used space. The scan may be out of date; file sizes and allocated storage can differ.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+
             // Storage Growth Indicator
             if (overview.storageGrowthText != null) {
                 Text(
@@ -313,54 +346,24 @@ private fun MultiSegmentStorageBar(
     overview: StorageOverviewData,
     modifier: Modifier = Modifier
 ) {
-    val totalCapacity = overview.totalBytes.coerceAtLeast(1L).toFloat()
-
+    val segments = StorageAnalyzer.storageBarSegments(overview)
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(7.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Row(modifier = Modifier.fillMaxWidth().fillMaxHeight()) {
-            val nonZeroCategories = overview.categoryBreakdown.filter { it.totalBytes > 0 }
-
-            if (nonZeroCategories.isEmpty()) {
-                // If not scanned yet, show standard used block
-                val usedRatio = (overview.usedBytes.toFloat() / totalCapacity).coerceIn(0f, 1f)
-                if (usedRatio > 0f) {
-                    Box(
-                        modifier = Modifier
-                            .weight(usedRatio)
-                            .fillMaxHeight()
-                            .background(MaterialTheme.colorScheme.primary)
-                    )
+            segments.filter { it.fraction > 0f }.forEach { segment ->
+                val color = when (segment.kind) {
+                    StorageSegmentKind.INDEXED -> segment.category?.getColor() ?: MaterialTheme.colorScheme.primary
+                    StorageSegmentKind.UNINDEXED -> MaterialTheme.colorScheme.outline
+                    StorageSegmentKind.FREE -> MaterialTheme.colorScheme.surfaceVariant
                 }
-                val freeRatio = (1f - usedRatio).coerceAtLeast(0.001f)
                 Box(
                     modifier = Modifier
-                        .weight(freeRatio)
+                        .weight(segment.fraction)
                         .fillMaxHeight()
-                        .background(Color.Transparent)
-                )
-            } else {
-                // Show each category as a proportional segment
-                nonZeroCategories.forEach { categoryData ->
-                    val ratio = (categoryData.totalBytes.toFloat() / totalCapacity).coerceAtLeast(0.002f)
-                    Box(
-                        modifier = Modifier
-                            .weight(ratio)
-                            .fillMaxHeight()
-                            .background(categoryData.category.getColor())
-                    )
-                }
-
-                // Remaining free space
-                val remainingBytes = overview.freeBytes.toFloat()
-                val freeRatio = (remainingBytes / totalCapacity).coerceIn(0.001f, 1f)
-                Box(
-                    modifier = Modifier
-                        .weight(freeRatio)
-                        .fillMaxHeight()
-                        .background(Color.Transparent)
+                        .background(color)
                 )
             }
         }

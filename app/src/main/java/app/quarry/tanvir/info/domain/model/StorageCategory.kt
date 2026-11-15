@@ -34,7 +34,7 @@ enum class StorageCategory(val displayName: String) {
         )
 
         fun fromExtension(ext: String): StorageCategory {
-            val lower = ext.lowercase(Locale.ROOT).trimStart('.')
+            val lower = ext.lowercase(Locale.ROOT).substringAfterLast('.')
             return when {
                 VIDEO_EXTENSIONS.contains(lower) -> VIDEOS
                 IMAGE_EXTENSIONS.contains(lower) -> IMAGES

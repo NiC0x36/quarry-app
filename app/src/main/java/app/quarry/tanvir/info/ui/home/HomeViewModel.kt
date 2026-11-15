@@ -11,7 +11,6 @@ import app.quarry.tanvir.info.data.database.ScanSnapshotEntity
 import app.quarry.tanvir.info.data.filesystem.FastStorageScanner
 import app.quarry.tanvir.info.data.preferences.UserPreferencesRepository
 import app.quarry.tanvir.info.domain.analyzer.QuickInsight
-import app.quarry.tanvir.info.domain.app.AppManager
 import app.quarry.tanvir.info.domain.analyzer.StorageAnalyzer
 import app.quarry.tanvir.info.domain.analyzer.StorageOverviewData
 import app.quarry.tanvir.info.domain.file.FileOperationsManager
@@ -33,6 +32,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -70,17 +70,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val volumeManager = StorageVolumeManager.getInstance(application)
     private val fileOperationsManager = FileOperationsManager(application, repository)
     private val securityManager = BiometricSecurityManager(application)
-    private val appManager = AppManager(application)
     private val _permissionState = MutableStateFlow(checkHasStoragePermission())
     private val _availableVolumes = MutableStateFlow<List<StorageVolumeInfo>>(emptyList())
     private val _selectedVolume = MutableStateFlow<StorageVolumeInfo?>(null)
     private val _activeSheetData = MutableStateFlow<HomeSheetData?>(null)
     private val _selectedDetailFile = MutableStateFlow<FileEntity?>(null)
     private val _userMessage = MutableStateFlow<String?>(null)
-    private val _appsSize = MutableStateFlow(0L)
-    private val _appsCount = MutableStateFlow(0L)
     private var activeSheetCollectJob: Job? = null
-    private var appsLoadJob: Job? = null
 
     private data class VolumeScannedData(
         val categoryStats: List<CategoryStat> = emptyList(),
@@ -111,8 +107,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             volumeScannedData,
             repository.allSnapshots,
             _permissionState,
-            _appsSize,
-            _appsCount,
             prefsRepo.isQuickInsightsEnabled,
             prefsRepo.enabledCategories,
             prefsRepo.isHapticsEnabled,
@@ -125,27 +119,26 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             @Suppress("UNCHECKED_CAST")
             val snapshots = args[2] as List<ScanSnapshotEntity>
             val hasPermission = args[3] as Boolean
-            val appsSize = args[4] as Long
-            val appsCount = args[5] as Long
-            val quickInsightsEnabled = args[6] as Boolean
+            val quickInsightsEnabled = args[4] as Boolean
             @Suppress("UNCHECKED_CAST")
-            val enabledCats = args[7] as Set<String>
-            val hapticsEnabled = args[8] as Boolean
-            val hapticStrength = args[9] as Int
+            val enabledCats = args[5] as Set<String>
+            val hapticsEnabled = args[6] as Boolean
+            val hapticStrength = args[7] as Int
             @Suppress("UNCHECKED_CAST")
-            val availableVols = args[10] as List<StorageVolumeInfo>
-            val currentVol = args[11] as? StorageVolumeInfo
+            val availableVols = args[8] as List<StorageVolumeInfo>
+            val currentVol = args[9] as? StorageVolumeInfo
 
             val rootDir = if (currentVol != null) File(currentVol.path) else Environment.getExternalStorageDirectory()
-            val totalBytes = if (currentVol != null && currentVol.totalBytes > 0) currentVol.totalBytes else FastStorageScanner.getTotalStorageBytes(rootDir)
-            val freeBytes = if (currentVol != null && currentVol.totalBytes > 0) currentVol.freeBytes else FastStorageScanner.getFreeStorageBytes(rootDir)
+            // Refresh allocation after each scan instead of retaining the volume-discovery values.
+            val measuredTotal = FastStorageScanner.getTotalStorageBytes(rootDir)
+            val totalBytes = measuredTotal.takeIf { it > 0 } ?: (currentVol?.totalBytes ?: 0L)
+            val freeBytes = if (measuredTotal > 0) FastStorageScanner.getFreeStorageBytes(rootDir)
+                else currentVol?.freeBytes ?: 0L
 
             val largeFilesSize = scannedData.largeFiles.sumOf { it.size }
             val apksSize = scannedData.apks.sumOf { it.size }
             val screenshotsSize = scannedData.screenshots.sumOf { it.size }
             val isPrimary = currentVol?.isPrimary ?: true
-            val effectiveAppsSize = if (isPrimary) appsSize else 0L
-            val effectiveAppsCount = if (isPrimary) appsCount else 0L
 
             val overview = StorageAnalyzer.calculateOverview(
                 volumeName = currentVol?.name ?: "Internal Storage",
@@ -160,9 +153,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 apksSize = apksSize,
                 apksCount = scannedData.apks.size.toLong(),
                 screenshotsSize = screenshotsSize,
-                screenshotsCount = scannedData.screenshots.size.toLong(),
-                appsSize = effectiveAppsSize,
-                appsCount = effectiveAppsCount
+                screenshotsCount = scannedData.screenshots.size.toLong()
             )
 
             val allCats = StorageCategory.entries.map { it.name }.toSet()
@@ -210,7 +201,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             availableVolumes = vis.availableVolumes,
             selectedVolume = vis.selectedVolume
         )
-    }.stateIn(
+    }.flowOn(Dispatchers.IO).stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = HomeUiState()
@@ -262,7 +253,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
         refreshVolumes()
         checkAndTriggerInitialScan()
-        loadAppsInfo()
     }
 
     fun refreshVolumes() {
@@ -295,22 +285,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun loadAppsInfo() {
-        appsLoadJob?.cancel()
-        appsLoadJob = viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val installedApps = appManager.getInstalledApps()
-                _appsSize.value = installedApps.sumOf { it.size.totalBytes }
-                _appsCount.value = installedApps.size.toLong()
-            } catch (e: Exception) {
-                // Apps info is optional; leave at zero on failure.
-            }
-        }
-    }
-
-    fun refreshAppsInfo() {
-        loadAppsInfo()
-    }
+    // Kept for lifecycle callers; this build analyzes files only, never installed apps.
+    fun refreshAppsInfo() = Unit
 
     fun startScan() {
         if (!checkHasStoragePermission()) {
@@ -340,7 +316,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         if (hasPermission && (!previous || repository.scanState.value is ScanState.Idle)) {
             checkAndTriggerInitialScan()
         }
-        loadAppsInfo()
     }
 
     private fun checkAndTriggerInitialScan() {

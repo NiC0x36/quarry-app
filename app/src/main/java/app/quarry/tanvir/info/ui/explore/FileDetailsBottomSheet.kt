@@ -1,15 +1,8 @@
 package app.quarry.tanvir.info.ui.explore
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import app.quarry.tanvir.info.ui.components.QuarryToast
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,24 +10,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ContentCopy
-import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.DriveFileRenameOutline
 import androidx.compose.material.icons.rounded.FolderOpen
-import androidx.compose.material.icons.rounded.OpenInNew
-import androidx.compose.material.icons.rounded.Share
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -43,8 +26,6 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -52,8 +33,6 @@ import app.quarry.tanvir.info.data.database.FileEntity
 import app.quarry.tanvir.info.domain.model.StorageCategory
 import app.quarry.tanvir.info.domain.model.StorageFormatter
 import app.quarry.tanvir.info.ui.components.FileThumbnail
-import app.quarry.tanvir.info.ui.components.getColor
-import app.quarry.tanvir.info.ui.components.getIcon
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -63,18 +42,10 @@ import java.util.Locale
 fun FileDetailsBottomSheet(
     file: FileEntity,
     onDismiss: () -> Unit,
-    onOpen: (FileEntity) -> Unit,
-    onShare: (FileEntity) -> Unit,
-    onRename: (FileEntity) -> Unit,
-    onMoveToTrash: (FileEntity) -> Unit,
-    onDelete: (FileEntity) -> Unit,
-    onOpenContainingFolder: (String) -> Unit
+    onOpenContainingFolder: ((String) -> Unit)? = null
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val context = LocalContext.current
     val category = StorageCategory.fromExtension(file.extension)
-    val icon = category.getIcon()
-    val color = category.getColor()
 
     val dateFormatted = if (file.lastModified > 0) {
         SimpleDateFormat("MMMM dd, yyyy HH:mm", Locale.US).format(Date(file.lastModified))
@@ -116,7 +87,8 @@ fun FileDetailsBottomSheet(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = "${StorageFormatter.formatBytes(file.size)} · ${category.displayName}",
+                        text = if (file.hasIncompleteScan && file.size == 0L) "Size not determined"
+                            else "${StorageFormatter.formatBytes(file.size)} · ${if (file.isDirectory) "Folder" else category.displayName}",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Medium
@@ -126,7 +98,7 @@ fun FileDetailsBottomSheet(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
 
-            // Metadata card with full path viewer and Copy Path action
+            // Metadata remains inside the app.
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
@@ -166,22 +138,7 @@ fun FileDetailsBottomSheet(
                                 fontWeight = FontWeight.Medium
                             )
                         }
-                        IconButton(
-                            onClick = {
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                val clip = ClipData.newPlainText("File Path", file.path)
-                                clipboard.setPrimaryClip(clip)
-                                QuarryToast.show(context, "Path copied to clipboard")
-                            },
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.ContentCopy,
-                                contentDescription = "Copy Path",
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
+
                     }
 
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
@@ -230,145 +187,26 @@ fun FileDetailsBottomSheet(
                 }
             }
             val haptics = app.quarry.tanvir.info.domain.haptics.LocalQuarryHaptics.current
-            // Primary Actions (Open & Share)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = {
-                        haptics.click()
-                        onOpen(file)
-                    },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
-                ) {
-                    Icon(imageVector = Icons.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Open",
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                FilledTonalButton(
-                    onClick = {
-                        haptics.click()
-                        onShare(file)
-                    },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
-                ) {
-                    Icon(imageVector = Icons.Rounded.Share, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Share",
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
+            if (file.hasIncompleteScan) {
+                Text(
+                    text = file.scanStatusDescription,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error
+                )
             }
-
-            // Secondary Actions (Containing Folder & Rename)
-            Row(
+            if (onOpenContainingFolder != null) OutlinedButton(
+                onClick = {
+                    haptics.click()
+                    file.parentPath?.takeIf { it.isNotEmpty() }?.let(onOpenContainingFolder)
+                    onDismiss()
+                },
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                shape = RoundedCornerShape(12.dp)
             ) {
-                OutlinedButton(
-                    onClick = {
-                        haptics.click()
-                        val parent = file.parentPath
-                        if (!parent.isNullOrEmpty()) {
-                            onOpenContainingFolder(parent)
-                            onDismiss()
-                        }
-                    },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
-                ) {
-                    Icon(imageVector = Icons.Rounded.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Containing Folder",
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                OutlinedButton(
-                    onClick = {
-                        haptics.click()
-                        onRename(file)
-                    },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
-                ) {
-                    Icon(imageVector = Icons.Rounded.DriveFileRenameOutline, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Rename",
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
+                Icon(Icons.Rounded.FolderOpen, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Containing folder")
             }
-
-            // Destructive / Trash Actions (Move to Trash & Delete Permanently)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FilledTonalButton(
-                    onClick = {
-                        haptics.warning()
-                        onMoveToTrash(file)
-                        onDismiss()
-                    },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Delete,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Move to Trash",
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                Button(
-                    onClick = {
-                        haptics.warning()
-                        onDelete(file)
-                    },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error,
-                        contentColor = MaterialTheme.colorScheme.onError
-                    )
-                ) {
-                    Icon(imageVector = Icons.Rounded.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Delete Forever",
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-
             Spacer(modifier = Modifier.height(16.dp))
         }
     }

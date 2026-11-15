@@ -1,6 +1,7 @@
 package app.quarry.tanvir.info.data.database
 
 import androidx.room.Dao
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -27,7 +28,9 @@ data class ScanSnapshotEntity(
     val archivesBytes: Long = 0,
     val apksBytes: Long = 0,
     val otherBytes: Long = 0,
-    val scanDurationMs: Long = 0
+    val scanDurationMs: Long = 0,
+    @ColumnInfo(defaultValue = "0") val unreadableDirectories: Long = 0,
+    @ColumnInfo(defaultValue = "0") val excludedEntries: Long = 0
 )
 
 @Dao

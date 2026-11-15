@@ -12,7 +12,6 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import app.quarry.tanvir.info.ui.cleanup.CleanupScreen
 import app.quarry.tanvir.info.ui.explore.ExploreScreen
 import app.quarry.tanvir.info.ui.home.HomeScreen
 import app.quarry.tanvir.info.ui.settings.SettingsScreen
@@ -83,9 +82,6 @@ fun QuarryNavHost(
         }
         composable(Screen.Explore.route) {
             ExploreScreen()
-        }
-        composable(Screen.Cleanup.route) {
-            CleanupScreen()
         }
         composable(Screen.Settings.route) {
             SettingsScreen()

@@ -66,7 +66,7 @@ fun FolderSizeView(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         items(dirList, key = { it.path }) { folder ->
-            val progressFraction = (folder.size.toFloat() / maxSizeBytes.toFloat()).coerceIn(0.01f, 1f)
+            val progressFraction = (folder.size.toFloat() / maxSizeBytes.toFloat()).coerceIn(0f, 1f)
 
             Card(
                 modifier = Modifier
@@ -117,14 +117,17 @@ fun FolderSizeView(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "${folder.directChildrenCount} items",
+                                text = if (folder.hasIncompleteScan) folder.scanStatusDescription
+                                    else "${folder.directChildrenCount} items",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
 
                         Text(
-                            text = StorageFormatter.formatBytes(folder.size),
+                            text = if (folder.hasIncompleteScan && folder.size == 0L) "Unknown"
+                                else if (folder.hasIncompleteScan) "Known: ${StorageFormatter.formatBytes(folder.size)}"
+                                else StorageFormatter.formatBytes(folder.size),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary

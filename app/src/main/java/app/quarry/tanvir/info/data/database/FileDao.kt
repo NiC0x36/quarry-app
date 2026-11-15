@@ -79,7 +79,7 @@ interface FileDao {
     @Query("SELECT * FROM files WHERE lastModified <= :beforeTimestamp AND isDirectory = 0 ORDER BY lastModified ASC")
     fun getOldFiles(beforeTimestamp: Long): Flow<List<FileEntity>>
 
-    @Query("SELECT * FROM files WHERE isDirectory = 1 AND directChildrenCount = 0")
+    @Query("SELECT * FROM files WHERE isDirectory = 1 AND directChildrenCount = 0 AND scanStatus = 'COMPLETE'")
     fun getEmptyFolders(): Flow<List<FileEntity>>
 
     @Query("SELECT * FROM files WHERE size IN (SELECT size FROM files WHERE isDirectory = 0 GROUP BY size HAVING COUNT(*) > 1) AND isDirectory = 0 ORDER BY size DESC")
@@ -192,7 +192,7 @@ interface FileDao {
     @Query("SELECT * FROM files WHERE volumeId = :volumeId AND lastModified <= :beforeTimestamp AND isDirectory = 0 ORDER BY lastModified ASC")
     fun getOldFiles(beforeTimestamp: Long, volumeId: String): Flow<List<FileEntity>>
 
-    @Query("SELECT * FROM files WHERE volumeId = :volumeId AND isDirectory = 1 AND directChildrenCount = 0")
+    @Query("SELECT * FROM files WHERE volumeId = :volumeId AND isDirectory = 1 AND directChildrenCount = 0 AND scanStatus = 'COMPLETE'")
     fun getEmptyFolders(volumeId: String): Flow<List<FileEntity>>
 
     @Query("SELECT * FROM files WHERE volumeId = :volumeId AND size IN (SELECT size FROM files WHERE volumeId = :volumeId AND isDirectory = 0 GROUP BY size HAVING COUNT(*) > 1) AND isDirectory = 0 ORDER BY size DESC")

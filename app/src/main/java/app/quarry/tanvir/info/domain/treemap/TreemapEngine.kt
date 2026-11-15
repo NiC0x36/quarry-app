@@ -7,267 +7,196 @@ import kotlin.math.min
 
 object TreemapEngine {
 
-    /**
-     * Builds a TreemapNode hierarchy from a list of FileEntity objects.
-     * If rootPath is provided, only items under rootPath will be included.
-     */
+    /** Builds the immediate children of [rootPath], retaining zero-byte entries as metadata. */
     fun buildTree(
         files: List<FileEntity>,
         rootPath: String = ""
     ): TreemapNode {
-        val filtered = if (rootPath.isEmpty()) {
-            files
-        } else {
-            files.filter { it.path.startsWith(rootPath) && it.path != rootPath }
-        }
+        val root = normalizePath(rootPath)
+        val filtered = files
+            .filter { isDescendant(it.path, root) }
+            .distinctBy { it.path }
 
-        // Ignore zero-byte folders: they carry no visual weight and would waste the
-        // guaranteed minimum floor in the treemap. Filter before any aggregation.
-        val effectiveFiltered = filtered.filterNot { it.isDirectory && it.size == 0L }
-
-        if (effectiveFiltered.isEmpty()) {
-            return TreemapNode(
-                path = rootPath.ifEmpty { "/" },
-                name = if (rootPath.isEmpty()) "Storage" else rootPath.substringAfterLast('/'),
-                size = 0L,
-                isDirectory = true,
-                category = StorageCategory.OTHER
-            )
-        }
-
-        // Aggregate immediate children of rootPath
-        val directChildren = if (rootPath.isEmpty()) {
-            effectiveFiltered.filter { it.parentPath == null || it.parentPath.isEmpty() || it.parentPath == "/" }
-        } else {
-            effectiveFiltered.filter { it.parentPath == rootPath }
-        }
-
-        val rawChildNodes = if (directChildren.isNotEmpty()) {
-            directChildren.map { entity ->
-                createNodeFromEntity(entity, effectiveFiltered)
+        // Group by path segment even when some intermediate directory records are missing.
+        // In particular, /Download must never include its sibling /Downloads.
+        val grouped = filtered.groupBy { entity ->
+            val path = normalizePath(entity.path)
+            val relative = if (root.isEmpty() || root == "/") {
+                path.trimStart('/')
+            } else {
+                path.removePrefix("$root/")
             }
-        } else {
-            // If flat file list or deep items, group by immediate child subpath
-            val grouped = effectiveFiltered.groupBy { entity ->
-                val relative = if (rootPath.isEmpty()) entity.path.trimStart('/') else entity.path.removePrefix(rootPath).trimStart('/')
-                val firstSegment = relative.substringBefore('/')
-                if (rootPath.isEmpty()) "/$firstSegment" else "$rootPath/$firstSegment"
-            }
+            val firstSegment = relative.substringBefore('/')
+            if (root.isEmpty() || root == "/") "/$firstSegment" else "$root/$firstSegment"
+        }
 
-            grouped.map { (childPath, groupFiles) ->
-                val isDir = groupFiles.size > 1 || groupFiles.any { it.path != childPath } || groupFiles.first().isDirectory
-                val totalSize = groupFiles.sumOf { if (!it.isDirectory) it.size else 0L }
-                val category = if (isDir) StorageCategory.OTHER else StorageCategory.fromExtension(childPath.substringAfterLast('.'))
+        val children = grouped.map { (childPath, descendants) ->
+            val directEntity = descendants.firstOrNull { normalizePath(it.path) == childPath }
+            if (directEntity != null) {
+                createNodeFromEntity(directEntity, descendants)
+            } else {
                 TreemapNode(
                     path = childPath,
                     name = childPath.substringAfterLast('/'),
-                    size = totalSize,
-                    isDirectory = isDir,
-                    category = category
+                    size = sumSizes(descendants.filterNot { it.isDirectory }.map { it.size }),
+                    isDirectory = true,
+                    category = StorageCategory.OTHER
                 )
             }
-        }
-
-        // Defensive drop: any directory that ended up with 0 bytes after aggregation is hidden.
-        val childNodes = rawChildNodes
-            .filterNot { it.isDirectory && it.size == 0L }
-            .sortedByDescending { it.size }
-
-        val totalSize = childNodes.sumOf { it.size }
+        }.sortedByDescending { it.size }
 
         return TreemapNode(
-            path = rootPath.ifEmpty { "/" },
-            name = if (rootPath.isEmpty()) "Storage" else rootPath.substringAfterLast('/'),
-            size = totalSize,
+            path = root.ifEmpty { "/" },
+            name = if (root.isEmpty() || root == "/") "Storage" else root.substringAfterLast('/'),
+            size = sumSizes(children.map { it.size }),
             isDirectory = true,
             category = StorageCategory.OTHER,
-            children = childNodes
+            children = children
         )
     }
 
-    private fun createNodeFromEntity(entity: FileEntity, allFiles: List<FileEntity>): TreemapNode {
-        val category = StorageCategory.fromExtension(entity.extension)
-        return if (entity.isDirectory) {
-            val descendants = allFiles.filter { it.path.startsWith(entity.path) && it.path != entity.path && !it.isDirectory }
-            val dirSize = if (entity.size > 0) entity.size else descendants.sumOf { it.size }
-            TreemapNode(
-                path = entity.path,
-                name = entity.name,
-                size = dirSize,
-                isDirectory = true,
-                category = StorageCategory.OTHER
-            )
+    private fun createNodeFromEntity(entity: FileEntity, files: List<FileEntity>): TreemapNode {
+        val size = if (entity.isDirectory && entity.size <= 0L) {
+            sumSizes(files.filter { !it.isDirectory && isDescendant(it.path, entity.path) }.map { it.size })
         } else {
-            TreemapNode(
-                path = entity.path,
-                name = entity.name,
-                size = entity.size,
-                isDirectory = false,
-                category = category
-            )
+            entity.size.coerceAtLeast(0L)
         }
+        return TreemapNode(
+            path = entity.path,
+            name = entity.name,
+            size = size,
+            isDirectory = entity.isDirectory,
+            category = if (entity.isDirectory) StorageCategory.OTHER else StorageCategory.fromExtension(entity.extension)
+        )
+    }
+
+    private fun normalizePath(path: String): String =
+        path.trimEnd('/').ifEmpty { if (path.startsWith('/')) "/" else "" }
+
+    private fun isDescendant(path: String, rootPath: String): Boolean {
+        val root = normalizePath(rootPath)
+        val candidate = normalizePath(path)
+        return when (root) {
+            "" -> candidate.isNotEmpty() && candidate != "/"
+            "/" -> candidate.startsWith('/') && candidate.length > 1
+            else -> candidate.startsWith("$root/")
+        }
+    }
+
+    private fun sumSizes(sizes: List<Long>): Long = sizes.fold(0L) { sum, size ->
+        sum + size.coerceIn(0L, Long.MAX_VALUE - sum)
     }
 
     /**
-     * Calculates squarified treemap layout for a list of items within target bounds [0, 0, width, height].
-     * Uses the Squarified Treemap Algorithm with balanced minimum item weighting to ensure every file and directory
-     * is clearly visible, easily tappable, and never collapsed into unclickable narrow slivers.
+     * Allocates rectangle areas strictly in proportion to bytes. Zero-byte entries have no
+     * area; they remain available in the list. Touch targets and zoom belong to the canvas
+     * and must not change the measured areas.
      */
-    fun layoutSquarified(
-        items: List<TreemapNode>,
-        bounds: TreemapRect
-    ): List<TreemapNode> {
-        // Drop zero-byte folders so they never consume the guaranteed visible floor.
-        val nonZeroItems = items.filterNot { it.isDirectory && it.size == 0L }
-        if (nonZeroItems.isEmpty() || bounds.width <= 0f || bounds.height <= 0f) return emptyList()
+    fun layoutSquarified(items: List<TreemapNode>, bounds: TreemapRect): List<TreemapNode> {
+        if (!bounds.left.isFinite() || !bounds.top.isFinite() ||
+            !bounds.right.isFinite() || !bounds.bottom.isFinite()
+        ) return emptyList()
 
-        val sortedItems = nonZeroItems.sortedByDescending { it.size }
-        if (sortedItems.isEmpty()) return emptyList()
+        val rect = LayoutRect(
+            bounds.left.toDouble(), bounds.top.toDouble(),
+            bounds.right.toDouble(), bounds.bottom.toDouble()
+        )
+        if (rect.width <= 0.0 || rect.height <= 0.0) return emptyList()
 
-        val totalArea = (bounds.width * bounds.height).toDouble()
-        val n = sortedItems.size
+        val sorted = items.filter { it.size > 0L }.sortedByDescending { it.size }
+        if (sorted.isEmpty()) return emptyList()
 
-        // Calculate normalized areas with guaranteed minimum visible floor
-        // so smaller files and directories are clearly visible, distinct, and easily tappable.
-        val minFractionPerItem = (0.40 / n).coerceAtMost(0.035)
-        val guaranteedBaseArea = totalArea * minFractionPerItem
-        val totalGuaranteed = guaranteedBaseArea * n
-        val remainingArea = (totalArea - totalGuaranteed).coerceAtLeast(0.0)
-
-        val totalRawSize = sortedItems.sumOf { it.size }.coerceAtLeast(1L).toDouble()
-
-        val normalizedAreas = sortedItems.map { item ->
-            val proportionalShare = if (totalRawSize > 0) {
-                (item.size.toDouble() / totalRawSize) * remainingArea
-            } else {
-                0.0
-            }
-            guaranteedBaseArea + proportionalShare
-        }
-
+        // Sum as Double so even synthetic inputs exceeding Long.MAX_VALUE cannot overflow.
+        val totalBytes = sorted.sumOf { it.size.toDouble() }
+        val totalArea = rect.width * rect.height
+        val areas = sorted.map { it.size.toDouble() / totalBytes * totalArea }
         val result = mutableListOf<TreemapNode>()
-        squarify(sortedItems, normalizedAreas, bounds, result)
+        var remaining = rect
+        var first = 0
+
+        while (first < sorted.size) {
+            if (remaining.width <= 0.0 || remaining.height <= 0.0) {
+                // Subpixel areas may round to zero at an extreme size ratio. Never invent
+                // a visible minimum or divide by zero; the list still exposes these items.
+                val collapsed = TreemapRect(
+                    remaining.left.toFloat(), remaining.top.toFloat(),
+                    remaining.left.toFloat(), remaining.top.toFloat()
+                )
+                sorted.drop(first).forEach { result += it.copy(rect = collapsed) }
+                break
+            }
+
+            val shortSide = min(remaining.width, remaining.height)
+            var end = first + 1
+            var worst = worstAspectRatio(areas, first, end, shortSide)
+            while (end < sorted.size) {
+                val candidate = worstAspectRatio(areas, first, end + 1, shortSide)
+                if (candidate > worst) break
+                worst = candidate
+                end++
+            }
+            remaining = layoutRow(sorted, areas, first, end, remaining, result)
+            first = end
+        }
         return result
     }
 
-    private fun squarify(
-        children: List<TreemapNode>,
-        areas: List<Double>,
-        rect: TreemapRect,
-        result: MutableList<TreemapNode>
+    private data class LayoutRect(
+        val left: Double,
+        val top: Double,
+        val right: Double,
+        val bottom: Double
     ) {
-        if (children.isEmpty() || rect.width <= 0 || rect.height <= 0) return
-
-        var row = mutableListOf<TreemapNode>()
-        var rowAreas = mutableListOf<Double>()
-        var remainingChildren = children.toMutableList()
-        var remainingAreas = areas.toMutableList()
-        var currentRect = rect
-
-        while (remainingChildren.isNotEmpty()) {
-            val nextChild = remainingChildren.first()
-            val nextArea = remainingAreas.first()
-            val currentShortSide = min(currentRect.width, currentRect.height).toDouble()
-
-            if (row.isEmpty()) {
-                row.add(nextChild)
-                rowAreas.add(nextArea)
-                remainingChildren.removeAt(0)
-                remainingAreas.removeAt(0)
-            } else {
-                val currentWorst = worstAspectRatio(rowAreas, currentShortSide)
-                val newRowAreas = rowAreas + nextArea
-                val newWorst = worstAspectRatio(newRowAreas, currentShortSide)
-
-                if (newWorst <= currentWorst) {
-                    row.add(nextChild)
-                    rowAreas.add(nextArea)
-                    remainingChildren.removeAt(0)
-                    remainingAreas.removeAt(0)
-                } else {
-                    // Lay out current row and update remaining rectangle
-                    currentRect = layoutRow(row, rowAreas, currentRect, result)
-                    row = mutableListOf()
-                    rowAreas = mutableListOf()
-                }
-            }
-        }
-
-        if (row.isNotEmpty()) {
-            layoutRow(row, rowAreas, currentRect, result)
-        }
+        val width: Double get() = right - left
+        val height: Double get() = bottom - top
     }
 
-    private fun worstAspectRatio(rowAreas: List<Double>, length: Double): Double {
-        if (rowAreas.isEmpty() || length <= 0.0) return Double.MAX_VALUE
-        val totalArea = rowAreas.sum()
-        if (totalArea <= 0.0) return Double.MAX_VALUE
-        val otherSide = totalArea / length
-
-        var worst = 0.0
-        for (area in rowAreas) {
-            val itemLength = area / otherSide
-            val ratio = max(otherSide / itemLength, itemLength / otherSide)
-            if (ratio > worst) worst = ratio
+    private fun worstAspectRatio(areas: List<Double>, first: Int, end: Int, length: Double): Double {
+        var total = 0.0
+        var smallest = Double.POSITIVE_INFINITY
+        var largest = 0.0
+        for (i in first until end) {
+            total += areas[i]
+            smallest = min(smallest, areas[i])
+            largest = max(largest, areas[i])
         }
-        return worst
+        if (total <= 0.0 || smallest <= 0.0 || length <= 0.0) return Double.MAX_VALUE
+        val lengthSquared = length * length
+        val totalSquared = total * total
+        return max(lengthSquared * largest / totalSquared, totalSquared / (lengthSquared * smallest))
     }
 
     private fun layoutRow(
-        row: List<TreemapNode>,
-        rowAreas: List<Double>,
-        rect: TreemapRect,
+        items: List<TreemapNode>,
+        areas: List<Double>,
+        first: Int,
+        end: Int,
+        rect: LayoutRect,
         result: MutableList<TreemapNode>
-    ): TreemapRect {
-        val totalArea = rowAreas.sum()
-        val isHorizontal = rect.width < rect.height
+    ): LayoutRect {
+        var rowArea = 0.0
+        for (i in first until end) rowArea += areas[i]
+        val horizontal = rect.width < rect.height
+        val finalRow = end == items.size
 
-        if (isHorizontal) {
-            // Horizontal slice (subdividing along height)
-            val rowHeight = (totalArea / rect.width).toFloat().coerceAtMost(rect.height)
-            var currentX = rect.left
-            for (i in row.indices) {
-                val isLast = (i == row.size - 1)
-                val itemWidth = (rowAreas[i] / rowHeight).toFloat()
-                val nextX = if (isLast) rect.right else (currentX + itemWidth).coerceAtMost(rect.right)
-                val itemRect = TreemapRect(
-                    left = currentX,
-                    top = rect.top,
-                    right = nextX,
-                    bottom = (rect.top + rowHeight).coerceAtMost(rect.bottom)
-                )
-                result.add(row[i].copy(rect = itemRect))
-                currentX = nextX
+        if (horizontal) {
+            val bottom = if (finalRow) rect.bottom else (rect.top + rowArea / rect.width).coerceIn(rect.top, rect.bottom)
+            var left = rect.left
+            for (i in first until end) {
+                val right = if (i == end - 1) rect.right else (left + rect.width * areas[i] / rowArea).coerceIn(left, rect.right)
+                result += items[i].copy(rect = TreemapRect(left.toFloat(), rect.top.toFloat(), right.toFloat(), bottom.toFloat()))
+                left = right
             }
-            return TreemapRect(
-                left = rect.left,
-                top = (rect.top + rowHeight).coerceAtMost(rect.bottom),
-                right = rect.right,
-                bottom = rect.bottom
-            )
-        } else {
-            // Vertical slice (subdividing along width)
-            val rowWidth = (totalArea / rect.height).toFloat().coerceAtMost(rect.width)
-            var currentY = rect.top
-            for (i in row.indices) {
-                val isLast = (i == row.size - 1)
-                val itemHeight = (rowAreas[i] / rowWidth).toFloat()
-                val nextY = if (isLast) rect.bottom else (currentY + itemHeight).coerceAtMost(rect.bottom)
-                val itemRect = TreemapRect(
-                    left = rect.left,
-                    top = currentY,
-                    right = (rect.left + rowWidth).coerceAtMost(rect.right),
-                    bottom = nextY
-                )
-                result.add(row[i].copy(rect = itemRect))
-                currentY = nextY
-            }
-            return TreemapRect(
-                left = (rect.left + rowWidth).coerceAtMost(rect.right),
-                top = rect.top,
-                right = rect.right,
-                bottom = rect.bottom
-            )
+            return rect.copy(top = bottom)
         }
+
+        val right = if (finalRow) rect.right else (rect.left + rowArea / rect.height).coerceIn(rect.left, rect.right)
+        var top = rect.top
+        for (i in first until end) {
+            val bottom = if (i == end - 1) rect.bottom else (top + rect.height * areas[i] / rowArea).coerceIn(top, rect.bottom)
+            result += items[i].copy(rect = TreemapRect(rect.left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat()))
+            top = bottom
+        }
+        return rect.copy(left = right)
     }
 }

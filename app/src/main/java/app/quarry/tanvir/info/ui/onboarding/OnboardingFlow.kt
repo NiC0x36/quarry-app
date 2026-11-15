@@ -68,7 +68,7 @@ val onboardingSteps = listOf(
     OnboardingStepData(
         badge = "Overview",
         title = "Welcome to Quarry",
-        subtitle = "Easily see what is taking up space on your phone and keep your storage organized.",
+        subtitle = "See which accessible files take up space. This build only analyzes files and never changes them.",
         icon = Icons.Rounded.SdStorage,
         highlightPoints = listOf(
             "Clear storage overview at a glance",
@@ -91,18 +91,18 @@ val onboardingSteps = listOf(
         subtitle = "Everything stays on your device. No internet needed, no tracking, and zero cloud uploads.",
         icon = Icons.Rounded.Lock,
         highlightPoints = listOf(
-            "Zero data collection or telemetry",
+            "No telemetry or cloud service",
             "Your files never leave your device"
         )
     ),
     OnboardingStepData(
         badge = "Permission",
         title = "Storage Access",
-        subtitle = "To analyze your storage and find large files or duplicates, Quarry needs permission to manage files.",
+        subtitle = "Android requires broad file access to scan shared storage. This analysis-only build does not use that access to change your files.",
         icon = Icons.Rounded.FolderSpecial,
         highlightPoints = listOf(
             "Scans internal storage and SD cards",
-            "Safe local cleanup with biometric protection"
+            "Read-only analysis; private app folders remain protected"
         )
     )
 )

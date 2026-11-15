@@ -26,12 +26,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -45,12 +45,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.quarry.tanvir.info.R
 import androidx.fragment.app.FragmentActivity
-import app.quarry.tanvir.info.data.database.FileEntity
 import app.quarry.tanvir.info.domain.analyzer.QuickInsight
 import app.quarry.tanvir.info.domain.model.StorageCategory
 import app.quarry.tanvir.info.domain.scanner.ScanState
 import app.quarry.tanvir.info.ui.explore.FileDetailsBottomSheet
-import app.quarry.tanvir.info.ui.explore.RenameDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,18 +63,11 @@ fun HomeScreen(
     val scrollState = rememberScrollState()
     val context = LocalContext.current
     val activity = context as? FragmentActivity
-    var renamingFile by remember { mutableStateOf<FileEntity?>(null) }
-    var showAppManager by remember { mutableStateOf(false) }
-    var appManagerStartSelection by remember { mutableStateOf(false) }
     var showExitDialog by remember { mutableStateOf(false) }
-    val appManagerViewModel: AppManagerViewModel = viewModel()
-    val appManagerState by appManagerViewModel.uiState.collectAsStateWithLifecycle()
     val haptics = app.quarry.tanvir.info.domain.haptics.LocalQuarryHaptics.current
 
     val hasActiveHomeScreenOverlay = uiState.activeSheetData != null ||
-        showAppManager ||
-        uiState.selectedDetailFile != null ||
-        renamingFile != null
+        uiState.selectedDetailFile != null
 
     BackHandler(enabled = !hasActiveHomeScreenOverlay && !showExitDialog) {
         showExitDialog = true
@@ -97,9 +88,6 @@ fun HomeScreen(
             if (event == Lifecycle.Event.ON_RESUME) {
                 viewModel.refreshPermissionState()
                 viewModel.refreshVolumes()
-                if (showAppManager) {
-                    appManagerViewModel.refresh()
-                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -213,7 +201,7 @@ fun HomeScreen(
                 }
             },
                 onInsightLongClick = { insight ->
-                    viewModel.selectInsight(insight, startInSelectionMode = true)
+                    viewModel.selectInsight(insight)
                 },
                 hapticsEnabled = uiState.isHapticsEnabled,
                 hapticStrength = uiState.hapticStrength
@@ -222,25 +210,15 @@ fun HomeScreen(
 
         // Storage Categories Grid (respects Miscellaneous visibility, min 4)
         CategoryGrid(
-            categories = uiState.visibleCategoryBreakdown,
+            categories = uiState.visibleCategoryBreakdown.filter { it.category != StorageCategory.APPS },
             onCategoryClick = { category ->
-                if (category == StorageCategory.APPS) {
-                    appManagerStartSelection = false
-                    showAppManager = true
-                } else if (onNavigateToCategory != null) {
+                if (onNavigateToCategory != null) {
                     onNavigateToCategory(category)
                 } else {
                     viewModel.selectCategory(category)
                 }
             },
-            onCategoryLongClick = { category ->
-                if (category == StorageCategory.APPS) {
-                    appManagerStartSelection = true
-                    showAppManager = true
-                } else {
-                    viewModel.selectCategory(category, startInSelectionMode = true)
-                }
-            },
+            onCategoryLongClick = { category -> viewModel.selectCategory(category) },
             hapticsEnabled = uiState.isHapticsEnabled,
             hapticStrength = uiState.hapticStrength
         )
@@ -255,17 +233,8 @@ fun HomeScreen(
             title = sheetData.title,
             category = sheetData.category,
             files = sheetData.files,
-            startInSelectionMode = sheetData.startInSelectionMode,
-            hapticsEnabled = uiState.isHapticsEnabled,
-            hapticStrength = uiState.hapticStrength,
             onFileClick = { file ->
                 viewModel.selectDetailFile(file)
-            },
-            onMoveToTrashSelected = { files, onComplete ->
-                viewModel.moveToTrashBatch(activity, files, onComplete)
-            },
-            onDeleteSelected = { files, onComplete ->
-                viewModel.deletePermanentlyBatch(activity, files, onComplete)
             },
             onDismiss = {
                 viewModel.dismissSheet()
@@ -273,70 +242,11 @@ fun HomeScreen(
         )
     }
 
-    // App Manager Sheet
-    if (showAppManager) {
-        LaunchedEffect(showAppManager) {
-            appManagerViewModel.refresh()
-            if (appManagerStartSelection) {
-                appManagerViewModel.setSelectionMode(true)
-                appManagerStartSelection = false
-            }
-        }
-
-        AppManagerBottomSheet(
-            viewModel = appManagerViewModel,
-            hapticsEnabled = uiState.isHapticsEnabled,
-            hapticStrength = uiState.hapticStrength,
-            onDismiss = {
-                showAppManager = false
-                appManagerViewModel.setSelectionMode(false)
-            }
-        )
-
-        appManagerState.detailApp?.let { app ->
-            AppDetailsBottomSheet(
-                app = app,
-                icon = appManagerViewModel.getIcon(app.packageName),
-                onOpen = {
-                    appManagerViewModel.openApp(app)
-                    appManagerViewModel.dismissDetails()
-                },
-                onAppInfo = {
-                    appManagerViewModel.openAppDetails(app)
-                },
-                onOpenUsageAccess = {
-                    appManagerViewModel.openUsageAccessSettings()
-                },
-                onDismiss = { appManagerViewModel.dismissDetails() }
-            )
-        }
-    }
-
     // Individual File Details Sheet (Stays on Home)
     uiState.selectedDetailFile?.let { file ->
         FileDetailsBottomSheet(
             file = file,
-            onDismiss = { viewModel.selectDetailFile(null) },
-            onOpen = { viewModel.openFile(it) },
-            onShare = { viewModel.shareFile(it) },
-            onRename = { renamingFile = it },
-            onMoveToTrash = { viewModel.moveToTrash(activity, it) },
-            onDelete = { viewModel.deleteFile(activity, it) },
-            onOpenContainingFolder = {
-                viewModel.selectDetailFile(null)
-            }
-        )
-    }
-
-    // Rename Dialog
-    renamingFile?.let { file ->
-        RenameDialog(
-            file = file,
-            onDismiss = { renamingFile = null },
-            onConfirm = { newName ->
-                viewModel.renameFile(activity, file, newName)
-                renamingFile = null
-            }
+            onDismiss = { viewModel.selectDetailFile(null) }
         )
     }
 

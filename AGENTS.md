@@ -1,4 +1,12 @@
-# AGENTS.md — Developer & AI Agent Guidelines for Quarry
+# AGENTS.md — Developer & AI Agent Guidelines for Quarry Local
+
+## Fork requirements
+
+This checkout is the analysis-only `NiC0x36/quarry-app` fork. User files must never be changed, opened in external apps, shared, restored, purged, installed or uninstalled. Keep the denied backend APIs even when related UI is unreachable. Do not add network permission, telemetry or user-data exports. Index and path-bearing preferences must remain in Android no-backup storage, with explicit backup and transfer exclusions. Tests use synthetic data only.
+
+Treemap areas must be strictly proportional to bytes; improve touch handling without inflating areas. Keep unreadable/excluded/partial scan states visible and account for unindexed used space. App-size analysis is excluded. Settings that change scan inclusion require another full scan.
+
+The fork uses its own application ID and debug signing identity. Its workflow is manual verification only; no automated release publishing or Telegram integration. Use an existing user-selected JDK 21 and Android SDK. Never install Java automatically. These requirements supersede conflicting descriptions of the original app below.
 
 Welcome to **Quarry** (`app.quarry.tanvir.info`). This document outlines repository structure, architectural patterns, coding guidelines, and workflow conventions for developers and AI coding agents.
 
@@ -10,7 +18,7 @@ Welcome to **Quarry** (`app.quarry.tanvir.info`). This document outlines reposit
 
 - **100% Offline & Private**: All storage scanning, size calculation, and file operations occur entirely on-device. No telemetry, no external network uploads.
 - **Modern Android Native**: Targets Android 12.0+ (API 31+) through Android 16 (API 36), leveraging modern platform APIs, Coroutines, Flow, and Material You theming.
-- **Visual Storage Breakdown**: Hardware-accelerated squarified treemaps with guaranteed minimum tile visibility, list explorers, and duplicate/large file cleaners.
+- **Visual Storage Breakdown**: Byte-proportional squarified treemaps and read-only folder/list explorers, with explicit unknown storage.
 
 ---
 
@@ -76,7 +84,7 @@ app/src/main/java/app/quarry/tanvir/info/
 
 ### Treemap Engine & Visualization
 - **Squarified Treemap Algorithm**: `TreemapEngine` organizes directory hierarchies into squarified tiles maintaining optimal aspect ratios.
-- **Guaranteed Visible Floor**: Small files and directories are assigned a balanced minimum visual area floor (~3.5% canvas area) to prevent collapsing into invisible or unclickable 1px slivers.
+- **Proportional Area**: No minimum visual area floor. Small files remain accessible through zoom, hit targets and list views.
 - **Proximity-Aware Hit Detection**: `TreemapCanvas` evaluates touch events with distance tolerances to ensure direct, effortless tapping for both small and large tiles.
 - **Color Harmonization**: Every file and directory is rendered with distinct, harmonized HSL gradient tiles and high-contrast labels.
 
@@ -144,6 +152,6 @@ Follow the repository commit guidelines:
 3. **Change-Id & Signoff**: Include `Change-Id` footer and always commit with `-s` (`git commit -s`).
 
 ### Continuous Integration (GitHub Actions)
-- Pushing to `main` with code or build configuration changes triggers `.github/workflows/build.yml` (path whitelist automatically skips documentation, `assets/`, issue templates, and git config changes).
-- Builds are managed with sequential concurrency (`release-main`) to prevent overlapping releases.
-- The CI calculates semantic versions dynamically, updates `app/build.gradle.kts`, executes `./gradlew assembleRelease`, signs the APK (if keystore secrets are present), generates changelog notes from Git commits, creates a GitHub Release, and notifies Telegram with real-time build logs.
+- `.github/workflows/build.yml` runs only by manual dispatch.
+- It runs debug unit tests, lint and a debug build, then inspects APK privacy settings.
+- No release signing secrets, version rewriting, public releases or Telegram notifications are used.

@@ -3,7 +3,7 @@ package app.quarry.tanvir.info.ui.components
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
@@ -46,7 +46,7 @@ fun QuarryM3Slider(
     val updatedOnValueChange by rememberUpdatedState(onValueChange)
     val updatedOnValueChangeFinished by rememberUpdatedState(onValueChangeFinished)
 
-    BoxWithConstraints(
+    Box(
         modifier = modifier
             .fillMaxWidth()
             .height(48.dp)
