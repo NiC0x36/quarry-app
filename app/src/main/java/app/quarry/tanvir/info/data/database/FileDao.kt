@@ -55,6 +55,9 @@ interface FileDao {
     @Query("SELECT * FROM files WHERE path = :path LIMIT 1")
     suspend fun getFileByPath(path: String): FileEntity?
 
+    @Query("SELECT * FROM files WHERE volumeId = :volumeId AND path = :path LIMIT 1")
+    fun observeFileByPath(path: String, volumeId: String): Flow<FileEntity?>
+
     @Query("SELECT * FROM files WHERE isDirectory = 0 ORDER BY size DESC LIMIT :limit")
     fun getLargestFiles(limit: Int): Flow<List<FileEntity>>
 

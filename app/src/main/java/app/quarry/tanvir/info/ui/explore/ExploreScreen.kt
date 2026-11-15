@@ -61,9 +61,7 @@ fun ExploreScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val directoryFiles by viewModel.directoryFiles.collectAsStateWithLifecycle()
-    val allIndexedFiles by viewModel.allFiles.collectAsStateWithLifecycle()
-    val allCategorizedFiles by viewModel.allCategorizedFiles.collectAsStateWithLifecycle()
-    val treemapNodes by viewModel.treemapLayoutNodes.collectAsStateWithLifecycle()
+    val currentFolder by viewModel.currentFolder.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var activeCategorySheet by remember { mutableStateOf<ExploreCategorySheetData?>(null) }
 
@@ -222,12 +220,20 @@ fun ExploreScreen(
             )
         }
 
-        allIndexedFiles.find { it.path == uiState.currentPath && it.hasIncompleteScan }?.let { folder ->
+        currentFolder?.takeIf { it.hasIncompleteScan }?.let { folder ->
             Text(folder.scanStatusDescription, color = MaterialTheme.colorScheme.error)
         }
         if (uiState.viewMode == ExploreViewMode.TREEMAP) {
             Text(
                 "Areas show scanned bytes. Zoom into folders or use List for small and unreadable items.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        if (uiState.searchQuery.isNotBlank()) {
+            Text(
+                "Search is limited to ${ExplorerDataSources.SEARCH_LIMIT} indexed results.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -243,6 +249,7 @@ fun ExploreScreen(
 
             when (uiState.viewMode) {
                 ExploreViewMode.TREEMAP -> {
+                    val treemapNodes by viewModel.treemapLayoutNodes.collectAsStateWithLifecycle()
                     TreemapCanvas(
                         nodes = treemapNodes,
                         currentPath = uiState.currentPath,
@@ -290,23 +297,14 @@ fun ExploreScreen(
                 }
 
                 ExploreViewMode.LARGEST -> {
-                    val largestToDisplay = if (uiState.searchQuery.isNotBlank()) {
-                        uiState.largestFiles.filter { app.quarry.tanvir.info.domain.model.SearchMatcher.matches(it.name, it.path, uiState.searchQuery) }
-                    } else {
-                        uiState.largestFiles
-                    }
                     LargestFilesView(
-                        files = largestToDisplay,
+                        files = uiState.largestFiles,
                         onFileClick = { file -> viewModel.showDetails(file) }
                     )
                 }
 
                 ExploreViewMode.TYPES -> {
-                    val filesToCategorize = if (uiState.searchQuery.isNotBlank()) {
-                        allCategorizedFiles.filter { app.quarry.tanvir.info.domain.model.SearchMatcher.matches(it.name, it.path, uiState.searchQuery) }
-                    } else {
-                        allCategorizedFiles
-                    }
+                    val filesToCategorize by viewModel.allCategorizedFiles.collectAsStateWithLifecycle()
                     FileTypeGroupView(
                         files = filesToCategorize,
                         sortOrder = uiState.sortOrder,

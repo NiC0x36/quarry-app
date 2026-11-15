@@ -68,6 +68,7 @@ class ScanRepository(
     fun getAllNonDirectoryFiles(volumeId: String): Flow<List<FileEntity>> = database.fileDao().getAllNonDirectoryFiles(volumeId)
     suspend fun getAllNonDirectoryFilesSync(volumeId: String): List<FileEntity> = database.fileDao().getAllNonDirectoryFilesSync(volumeId)
     fun getChildren(parentPath: String, volumeId: String): Flow<List<FileEntity>> = database.fileDao().getChildren(parentPath, volumeId)
+    fun observeFileByPath(path: String, volumeId: String): Flow<FileEntity?> = database.fileDao().observeFileByPath(path, volumeId)
     fun getFilesByCategory(category: String, volumeId: String): Flow<List<FileEntity>> = database.fileDao().getFilesByCategory(category, volumeId)
     fun getLargestFiles(limit: Int = 100, volumeId: String): Flow<List<FileEntity>> = database.fileDao().getLargestFiles(limit, volumeId)
     fun searchFiles(query: String, volumeId: String): Flow<List<FileEntity>> = database.fileDao().searchFiles(query, volumeId)

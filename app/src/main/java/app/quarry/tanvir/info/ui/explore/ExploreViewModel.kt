@@ -24,6 +24,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
@@ -157,64 +160,48 @@ class ExploreViewModel(application: Application) : AndroidViewModel(application)
             showHidden || (!entity.name.startsWith(".") && !entity.path.contains("/."))
         }
 
+    private val activeVolumeId = _activeVolume.map { it?.id ?: "internal_storage" }
+        .distinctUntilChanged()
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val currentFolder: StateFlow<FileEntity?> = combine(_currentPath, activeVolumeId) { path, volumeId ->
+        path to volumeId
+    }.distinctUntilChanged().flatMapLatest { (path, volumeId) ->
+        repository.observeFileByPath(path, volumeId)
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(0, replayExpirationMillis = 0),
+        initialValue = null
+    )
+
     @OptIn(ExperimentalCoroutinesApi::class)
     private val filteredLargestFiles: StateFlow<List<FileEntity>> = combine(
-        _activeVolume.flatMapLatest { vol ->
-            val volId = vol?.id ?: "internal_storage"
-            repository.getLargestFiles(100, volId)
-        },
+        activeVolumeId.flatMapLatest { repository.getLargestFiles(100, it) },
         prefsRepo.scanHiddenFiles,
-        _sortOrder
-    ) { largest, showHidden, sort ->
-        val filtered = filterForDisplay(largest, showHidden)
-        filtered.sortedWith(sort.comparator(keepDirectoriesFirst = false))
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = emptyList()
-    )
-
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val allFiles: StateFlow<List<FileEntity>> = combine(
-        _activeVolume.flatMapLatest { vol ->
-            val volId = vol?.id ?: "internal_storage"
-            repository.getAllFiles(volId)
-        },
-        prefsRepo.scanHiddenFiles,
-        _sortOrder
-    ) { files, showHidden, sort ->
-        val filtered = filterForDisplay(files, showHidden)
-        filtered.sortedWith(sort.comparator(keepDirectoriesFirst = true))
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = emptyList()
-    )
-
-    private val searchResultsFlow: StateFlow<List<FileEntity>> = combine(
-        allFiles,
-        _searchQuery,
-        _selectedCategory,
         _sortOrder,
-        _currentPath
-    ) { files, query, category, sort, currentPath ->
-        if (query.isBlank()) {
-            emptyList()
-        } else {
-            val matching = files.filter { file ->
-                val matchesCategory = category == null || (!file.isDirectory && StorageCategory.fromExtension(file.extension) == category)
-                val matchesQuery = app.quarry.tanvir.info.domain.model.SearchMatcher.matches(file.name, file.path, query)
-                matchesCategory && matchesQuery
-            }
-
-            matching.sortedWith(
-                compareByDescending<FileEntity> { it.path.startsWith(currentPath) }
-                    .then(sort.comparator(keepDirectoriesFirst = true))
-            )
-        }
+        _searchQuery
+    ) { largest, showHidden, sort, query ->
+        filterForDisplay(largest, showHidden)
+            .filter { app.quarry.tanvir.info.domain.model.SearchMatcher.matches(it.name, it.path, query) }
+            .sortedWith(sort.comparator(keepDirectoriesFirst = false))
     }.flowOn(Dispatchers.Default).stateIn(
         scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
+        started = SharingStarted.WhileSubscribed(0, replayExpirationMillis = 0),
+        initialValue = emptyList()
+    )
+
+    private val searchResultsFlow: StateFlow<List<FileEntity>> = ExplorerDataSources.searchFiles(
+        combine(
+            activeVolumeId, _searchQuery, _currentPath, prefsRepo.scanHiddenFiles,
+            combine(_selectedCategory, _sortOrder, _viewMode) { category, sort, mode -> Triple(category, sort, mode) }
+        ) { volume, query, path, showHidden, (category, sort, mode) ->
+            ExplorerSearchRequest(volume, query, path, showHidden, category?.name, sort, mode)
+        }
+    ) { volumeId ->
+        repository.getAllFiles(volumeId)
+    }.flowOn(Dispatchers.Default).stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(0, replayExpirationMillis = 0),
         initialValue = emptyList()
     )
 
@@ -260,36 +247,38 @@ class ExploreViewModel(application: Application) : AndroidViewModel(application)
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val directoryFiles: StateFlow<List<FileEntity>> = combine(
-        combine(_currentPath, _activeVolume) { path, vol ->
-            path to (vol?.id ?: "internal_storage")
-        }.flatMapLatest { (path, volId) ->
-            repository.getChildren(path, volId)
+        combine(_currentPath, activeVolumeId, _viewMode, _searchQuery) { path, volume, mode, query ->
+            if (mode in setOf(ExploreViewMode.TREEMAP, ExploreViewMode.LIST, ExploreViewMode.FOLDERS) && query.isBlank()) {
+                path to volume
+            } else null
+        }.distinctUntilChanged().flatMapLatest { selection ->
+            if (selection == null) flowOf(emptyList())
+            else repository.getChildren(selection.first, selection.second)
         },
         prefsRepo.scanHiddenFiles,
         _sortOrder
     ) { children, showHidden, sort ->
-        val filtered = filterForDisplay(children, showHidden)
-        filtered.sortedWith(sort.comparator(keepDirectoriesFirst = true))
-    }.stateIn(
+        filterForDisplay(children, showHidden).sortedWith(sort.comparator(keepDirectoriesFirst = true))
+    }.flowOn(Dispatchers.Default).stateIn(
         scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
+        started = SharingStarted.WhileSubscribed(0, replayExpirationMillis = 0),
         initialValue = emptyList()
     )
 
-    @OptIn(ExperimentalCoroutinesApi::class)
     val allCategorizedFiles: StateFlow<List<FileEntity>> = combine(
-        _activeVolume.flatMapLatest { vol ->
-            val volId = vol?.id ?: "internal_storage"
-            repository.getAllNonDirectoryFiles(volId)
+        ExplorerDataSources.typesFiles(_viewMode, activeVolumeId, _searchQuery) {
+            repository.getAllNonDirectoryFiles(it)
         },
+        searchResultsFlow,
         prefsRepo.scanHiddenFiles,
-        _sortOrder
-    ) { files, showHidden, sort ->
-        val filtered = filterForDisplay(files, showHidden)
-        filtered.sortedWith(sort.comparator(keepDirectoriesFirst = false))
-    }.stateIn(
+        _sortOrder,
+        _searchQuery
+    ) { files, searchResults, showHidden, sort, query ->
+        val source = if (query.isBlank()) files else searchResults.filterNot { it.isDirectory }
+        filterForDisplay(source, showHidden).sortedWith(sort.comparator(keepDirectoriesFirst = false))
+    }.flowOn(Dispatchers.Default).stateIn(
         scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
+        started = SharingStarted.WhileSubscribed(0, replayExpirationMillis = 0),
         initialValue = emptyList()
     )
 
@@ -298,9 +287,10 @@ class ExploreViewModel(application: Application) : AndroidViewModel(application)
     val treemapLayoutNodes: StateFlow<List<TreemapNode>> = combine(
         directoryFiles,
         _currentPath,
-        _canvasBounds
-    ) { visibleChildren, path, (widthPx, heightPx) ->
-        if (visibleChildren.isEmpty()) {
+        _canvasBounds,
+        _viewMode
+    ) { visibleChildren, path, (widthPx, heightPx), mode ->
+        if (mode != ExploreViewMode.TREEMAP || visibleChildren.isEmpty()) {
             emptyList()
         } else {
             val w = if (widthPx > 0f) widthPx else 1000f
@@ -313,7 +303,7 @@ class ExploreViewModel(application: Application) : AndroidViewModel(application)
         }
     }.flowOn(Dispatchers.Default).stateIn(
         scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
+        started = SharingStarted.WhileSubscribed(0, replayExpirationMillis = 0),
         initialValue = emptyList()
     )
 
@@ -459,7 +449,7 @@ class ExploreViewModel(application: Application) : AndroidViewModel(application)
     fun promptDeleteSelected(displayedFiles: List<FileEntity>? = null) {
         val paths = _selectedPaths.value
         if (paths.isEmpty()) return
-        val availableFiles = displayedFiles ?: (directoryFiles.value + allFiles.value).distinctBy { it.path }
+        val availableFiles = displayedFiles ?: (directoryFiles.value + searchResultsFlow.value).distinctBy { it.path }
         val files = availableFiles.filter { paths.contains(it.path) }
         if (files.isNotEmpty()) {
             _activeDeleteCandidates.value = files
