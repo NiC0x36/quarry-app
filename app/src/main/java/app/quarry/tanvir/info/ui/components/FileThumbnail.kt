@@ -32,6 +32,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import app.quarry.tanvir.info.domain.media.ThumbnailSizing
 import app.quarry.tanvir.info.domain.media.ThumbnailLoader
 import app.quarry.tanvir.info.domain.model.StorageCategory
 
@@ -52,11 +53,12 @@ fun FileThumbnail(
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
-    val targetPx = remember(size, density) {
-        with(density) { size.roundToPx().coerceAtLeast(64) }
+    val safeSize = size.value.takeIf { it.isFinite() && it > 0f }?.coerceIn(1f, 256f)?.dp ?: 40.dp
+    val targetPx = remember(safeSize, density) {
+        ThumbnailSizing.targetEdge(with(density) { safeSize.toPx() }) ?: 0
     }
 
-    var thumbnailBitmap by remember(path, lastModified) { mutableStateOf<Bitmap?>(null) }
+    var thumbnailBitmap by remember(path, lastModified, category, targetPx, isDirectory) { mutableStateOf<Bitmap?>(null) }
 
     val isMediaOrPreviewable = !isDirectory && (
         category == StorageCategory.IMAGES ||
@@ -66,8 +68,8 @@ fun FileThumbnail(
         category == StorageCategory.AUDIO
     )
 
-    LaunchedEffect(path, lastModified, isMediaOrPreviewable) {
-        if (isMediaOrPreviewable) {
+    LaunchedEffect(path, lastModified, category, targetPx, isMediaOrPreviewable) {
+        if (isMediaOrPreviewable && targetPx > 0) {
             thumbnailBitmap = ThumbnailLoader.loadThumbnail(
                 context = context,
                 path = path,
@@ -86,7 +88,7 @@ fun FileThumbnail(
 
     Box(
         modifier = modifier
-            .size(size)
+            .size(safeSize)
             .clip(shape),
         contentAlignment = Alignment.Center
     ) {
@@ -112,7 +114,7 @@ fun FileThumbnail(
                             modifier = Modifier
                                 .align(Alignment.BottomEnd)
                                 .padding(2.dp)
-                                .size((size * 0.38f).coerceIn(14.dp, 20.dp))
+                                .size((safeSize * 0.38f).coerceIn(14.dp, 20.dp))
                                 .clip(CircleShape)
                                 .background(Color.Black.copy(alpha = 0.65f)),
                             contentAlignment = Alignment.Center
@@ -121,7 +123,7 @@ fun FileThumbnail(
                                 imageVector = Icons.Rounded.PlayArrow,
                                 contentDescription = "Video",
                                 tint = Color.White,
-                                modifier = Modifier.size((size * 0.28f).coerceIn(10.dp, 16.dp))
+                                modifier = Modifier.size((safeSize * 0.28f).coerceIn(10.dp, 16.dp))
                             )
                         }
                     }
@@ -137,7 +139,7 @@ fun FileThumbnail(
                         imageVector = categoryIcon,
                         contentDescription = contentDescription,
                         tint = categoryColor,
-                        modifier = Modifier.size((size * 0.55f).coerceAtLeast(16.dp))
+                        modifier = Modifier.size((safeSize * 0.55f).coerceAtLeast(16.dp))
                     )
                 }
             }
